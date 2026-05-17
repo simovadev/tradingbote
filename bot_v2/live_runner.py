@@ -63,10 +63,9 @@ COOLDOWN_SEC = 15 * 60
 # Max trades concurrents (toutes assets)
 MAX_CONCURRENT = 3
 
-# MM progressif (user 2026-05-17 : forward test 1 semaine en 5% par securite)
-# Une fois confiance OK -> repasser RISK_PCT_AGGRESSIVE a 0.20
+# MM progressif (user 2026-05-17 : remonte a 20% pour live aggressif)
 THRESHOLD_SAFE_MODE = 5000.0  # balance >= 5000 -> mode 5%
-RISK_PCT_AGGRESSIVE = 0.05    # 5% pendant forward test (au lieu de 20%)
+RISK_PCT_AGGRESSIVE = 0.20    # 20% par trade jusqu'a 5000€
 RISK_PCT_SAFE = 0.05
 RISK_PCT_TEST = 0.02
 
