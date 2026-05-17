@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 # Le bot utilise le nom standard (XAUUSD) en interne, on traduit a la sortie/entree.
 BROKER_SYMBOL_MAP: dict[str, str] = {
     "XAUUSD": "XAUUSD+",   # Vantage RAW ECN
+    "SPX500": "SP500",     # Vantage : sans le X
+    # DXY n'existe pas sur Vantage -> SMT correlation DXY desactivee
     # Les autres symboles sont identiques (NAS100, GER40, BTCUSD, EURUSD, etc.)
 }
 
@@ -127,7 +129,7 @@ class MT5Executor:
         broker_sym = to_broker_symbol(symbol)
         rates = mt5.copy_rates_from_pos(broker_sym, TF_MAP[tf], 0, n)
         if rates is None or len(rates) == 0:
-            log.warning(f"Pas de data pour {symbol} {tf} : {mt5.last_error()}")
+            log.debug(f"Pas de data pour {symbol} {tf} : {mt5.last_error()}")
             return None
 
         df = pd.DataFrame(rates)

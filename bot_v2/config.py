@@ -147,15 +147,16 @@ DEFAULT_INSTRUMENT = "XAUUSD"
 # - "inverse"  : sens oppose
 SMT_PAIRS: dict[str, list[tuple[str, str]]] = {
     # === Commodities / Indices ===
-    "XAUUSD": [("XAGUSD", "positive"), ("DXY", "inverse")],
+    # DXY retire (user 2026-05-17 : pas dispo sur Vantage RAW ECN)
+    "XAUUSD": [("XAGUSD", "positive")],
     "NAS100": [("SPX500", "positive"), ("GER40", "positive")],
     "GER40":  [("SPX500", "positive"), ("NAS100", "positive")],
     "USOUSD": [("UKOIL", "positive")],
     # === Forex (correlations ICT classiques) ===
-    "EURUSD": [("GBPUSD", "positive"), ("DXY", "inverse")],
-    "GBPUSD": [("EURUSD", "positive"), ("DXY", "inverse")],
-    "USDJPY": [("DXY", "positive")],         # JPY -> sens du dollar
-    "AUDUSD": [("EURUSD", "positive"), ("DXY", "inverse")],
+    "EURUSD": [("GBPUSD", "positive")],
+    "GBPUSD": [("EURUSD", "positive")],
+    "USDJPY": [],         # plus de DXY -> pas de paire SMT
+    "AUDUSD": [("EURUSD", "positive")],
 }
 
 
