@@ -19,7 +19,8 @@ from typing import Any
 import pandas as pd
 
 
-DB_PATH = Path("c:/Users/Shadow/TradingBot/db/live_state.sqlite")
+# Chemin relatif (compat PC dev + VPS prod)
+DB_PATH = Path(__file__).resolve().parent.parent / "db" / "live_state.sqlite"
 
 
 class LiveState:

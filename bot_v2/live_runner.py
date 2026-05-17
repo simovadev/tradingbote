@@ -98,12 +98,16 @@ def get_active_assets(balance: float) -> list[str]:
 
 _models_cache: dict[str, tuple[Any, list[str]]] = {}
 
+# Repertoire racine du repo (auto-detecte selon l'OS / user)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+BOT_V2_DIR = ROOT_DIR / "bot_v2"
+
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     if instrument in _models_cache:
         return _models_cache[instrument]
-    model_path = Path(f"c:/Users/Shadow/TradingBot/bot_v2/ml_model_{instrument}.pkl")
-    feat_path = Path(f"c:/Users/Shadow/TradingBot/bot_v2/ml_features_{instrument}.json")
+    model_path = BOT_V2_DIR / f"ml_model_{instrument}.pkl"
+    feat_path = BOT_V2_DIR / f"ml_features_{instrument}.json"
     if not model_path.exists():
         log.warning(f"Modele manquant pour {instrument}, skip")
         return None
@@ -385,11 +389,13 @@ def run_live(test_dry_run: bool = False):
     Args:
         test_dry_run: si True, ne place PAS d'ordres (juste detecte et log).
     """
+    # Log path relatif au repertoire du script (compat PC dev + VPS prod)
+    log_path = Path(__file__).resolve().parent.parent / "live.log"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
-            logging.FileHandler("c:/Users/Shadow/TradingBot/live.log"),
+            logging.FileHandler(str(log_path)),
             logging.StreamHandler(),
         ],
     )
