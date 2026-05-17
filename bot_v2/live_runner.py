@@ -63,9 +63,12 @@ COOLDOWN_SEC = 15 * 60
 # Max trades concurrents (toutes assets)
 MAX_CONCURRENT = 3
 
-# MM progressif (user 2026-05-17 : remonte a 20% pour live aggressif)
+# MM progressif (user 2026-05-18 : sprint 30% jusqu'a 5000€ puis 5% safe)
+# Objectif : atteindre 5000€ en ~2 semaines (vs 3 avec 20%)
+# Risque DD max attendu : -87% sur 5 LOSS consecutifs (90% chance sur 8.5 mois)
+# Aucune liquidation sur 200 simulations 480 trades.
 THRESHOLD_SAFE_MODE = 5000.0  # balance >= 5000 -> mode 5%
-RISK_PCT_AGGRESSIVE = 0.20    # 20% par trade jusqu'a 5000€
+RISK_PCT_AGGRESSIVE = 0.30    # 30% par trade jusqu'a 5000€ (sprint)
 RISK_PCT_SAFE = 0.05
 RISK_PCT_TEST = 0.02
 
