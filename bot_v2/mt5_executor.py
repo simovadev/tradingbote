@@ -24,6 +24,28 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 
+# === MAPPING SYMBOLES BROKER (user 2026-05-17) ===
+# Certains brokers ajoutent un suffixe (Vantage = "+" sur XAUUSD RAW ECN).
+# Le bot utilise le nom standard (XAUUSD) en interne, on traduit a la sortie/entree.
+BROKER_SYMBOL_MAP: dict[str, str] = {
+    "XAUUSD": "XAUUSD+",   # Vantage RAW ECN
+    # Les autres symboles sont identiques (NAS100, GER40, BTCUSD, EURUSD, etc.)
+}
+
+
+def to_broker_symbol(symbol: str) -> str:
+    """Convertit un nom standard (XAUUSD) en nom broker (XAUUSD+)."""
+    return BROKER_SYMBOL_MAP.get(symbol, symbol)
+
+
+def from_broker_symbol(broker_symbol: str) -> str:
+    """Inverse : convertit XAUUSD+ -> XAUUSD pour la coherence interne."""
+    for std, brok in BROKER_SYMBOL_MAP.items():
+        if brok == broker_symbol:
+            return std
+    return broker_symbol
+
+
 # === MAPPING TF (MT5 utilise des enums) ===
 TF_MAP = {
     "M1":  mt5.TIMEFRAME_M1 if mt5 else None,
@@ -102,7 +124,8 @@ class MT5Executor:
             log.error(f"TF inconnu : {tf}")
             return None
 
-        rates = mt5.copy_rates_from_pos(symbol, TF_MAP[tf], 0, n)
+        broker_sym = to_broker_symbol(symbol)
+        rates = mt5.copy_rates_from_pos(broker_sym, TF_MAP[tf], 0, n)
         if rates is None or len(rates) == 0:
             log.warning(f"Pas de data pour {symbol} {tf} : {mt5.last_error()}")
             return None
@@ -119,8 +142,9 @@ class MT5Executor:
         """Bougies sur plage de dates. Utile pour reload historique."""
         if tf not in TF_MAP:
             return None
+        broker_sym = to_broker_symbol(symbol)
         rates = mt5.copy_rates_range(
-            symbol, TF_MAP[tf],
+            broker_sym, TF_MAP[tf],
             start.to_pydatetime(), end.to_pydatetime(),
         )
         if rates is None or len(rates) == 0:
@@ -135,24 +159,25 @@ class MT5Executor:
 
     def symbol_info(self, symbol: str):
         """Info MT5 d'un symbole : volume_min, volume_step, point, digits, etc."""
-        return mt5.symbol_info(symbol)
+        return mt5.symbol_info(to_broker_symbol(symbol))
 
     def ensure_symbol_active(self, symbol: str) -> bool:
         """Active le symbole dans Market Watch (necessaire pour fetch bars)."""
-        info = mt5.symbol_info(symbol)
+        broker_sym = to_broker_symbol(symbol)
+        info = mt5.symbol_info(broker_sym)
         if info is None:
-            log.error(f"Symbole inconnu : {symbol}")
+            log.error(f"Symbole inconnu : {symbol} (broker={broker_sym})")
             return False
         if not info.visible:
-            ok = mt5.symbol_select(symbol, True)
+            ok = mt5.symbol_select(broker_sym, True)
             if not ok:
-                log.error(f"Impossible d'activer {symbol}")
+                log.error(f"Impossible d'activer {broker_sym}")
                 return False
         return True
 
     def current_price(self, symbol: str, direction: str) -> float | None:
         """Prix actuel ASK (pour BUY) ou BID (pour SELL)."""
-        tick = mt5.symbol_info_tick(symbol)
+        tick = mt5.symbol_info_tick(to_broker_symbol(symbol))
         if tick is None:
             return None
         if direction == "bullish":
@@ -164,7 +189,7 @@ class MT5Executor:
     def get_positions(self, symbol: str | None = None) -> list[dict]:
         """Liste des positions ouvertes. Si symbol fourni, filtre."""
         if symbol:
-            positions = mt5.positions_get(symbol=symbol)
+            positions = mt5.positions_get(symbol=to_broker_symbol(symbol))
         else:
             positions = mt5.positions_get()
         if positions is None:
@@ -172,7 +197,8 @@ class MT5Executor:
         return [
             {
                 "ticket": p.ticket,
-                "symbol": p.symbol,
+                "symbol": from_broker_symbol(p.symbol),  # standardise
+                "broker_symbol": p.symbol,
                 "type": "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
                 "volume": p.volume,
                 "price_open": p.price_open,
@@ -210,6 +236,7 @@ class MT5Executor:
         if not self.ensure_symbol_active(symbol):
             return None
 
+        broker_sym = to_broker_symbol(symbol)
         info = self.symbol_info(symbol)
         if info is None:
             log.error(f"symbol_info({symbol}) = None")
@@ -222,9 +249,9 @@ class MT5Executor:
         volume = round(volume, 2)
 
         # Recupere prix courant
-        tick = mt5.symbol_info_tick(symbol)
+        tick = mt5.symbol_info_tick(broker_sym)
         if tick is None:
-            log.error(f"Pas de tick pour {symbol}")
+            log.error(f"Pas de tick pour {broker_sym}")
             return None
 
         if direction == "bullish":
@@ -236,7 +263,7 @@ class MT5Executor:
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
+            "symbol": broker_sym,
             "volume": volume,
             "type": order_type,
             "price": price,
