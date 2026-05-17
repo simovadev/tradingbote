@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Data (gros fichiers, on re-fetch depuis Vantage en live)
+data/
+*.parquet
+
+# Logs
+*.log
+live.log
+backtest_*.log
+build_*.log
+train_*.log
+fetch_*.log
+
+# DB
+db/
+*.sqlite
+*.db
+
+# CSV temp
+*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Modèles backup (gros)
+bot_v2/ml_model_v*.pkl
+bot_v2/ml_features_v*.json
+bot_v2/ml_model_*_slfix_backup.pkl
+bot_v2/ml_features_*_slfix_backup.json
+
+# Anciens
+bot_v2/ml_model_*_M1_2ans.pkl
+bot_v2/ml_model_M5.pkl
+bot_v2/ml_features_M5.json
+bot_v2/ml_features_NAS100_M1.json
+
+# Secrets
+.env
+mt5_credentials.txt
+passwords.txt
+
+# Transcriptions vidéos / audios (gros + contient clés API, inutile en live)
+transcriptions_v2/
+transcriptions/
+**/*.mp4
+**/*.mp3
+**/*.wav
+**/*.m4a
+
+# Tests + temp
+ml_partial_archive_*/
+ml_partial_M*/
+ml_partial_random_*/
+
+# Bilans/MD perso (optionnel - on garde les BILAN_*)
+# CLAUDE.md
+

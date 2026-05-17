@@ -1,0 +1,40 @@
+=== METRIQUES PAR SET ===
+
+
+TRAIN (381 trades)
+  train  seuil=0.50 :  140 trades gardes, WR=84.3% (vs baseline 37.8%)
+  train  seuil=0.55 :  108 trades gardes, WR=88.9% (vs baseline 37.8%)
+  train  seuil=0.60 :   82 trades gardes, WR=91.5% (vs baseline 37.8%)
+  train  seuil=0.65 :   52 trades gardes, WR=98.1% (vs baseline 37.8%)
+  train  AUC = 0.943
+
+VAL (127 trades)
+  val    seuil=0.50 :   49 trades gardes, WR=65.3% (vs baseline 44.1%)
+  val    seuil=0.55 :   32 trades gardes, WR=71.9% (vs baseline 44.1%)
+  val    seuil=0.60 :   26 trades gardes, WR=73.1% (vs baseline 44.1%)
+  val    seuil=0.65 :   12 trades gardes, WR=83.3% (vs baseline 44.1%)
+  val    AUC = 0.761
+
+TEST (128 trades) - jamais vu en train
+  test   seuil=0.50 :   46 trades gardes, WR=71.7% (vs baseline 46.1%)
+  test   seuil=0.55 :   37 trades gardes, WR=75.7% (vs baseline 46.1%)
+  test   seuil=0.60 :   21 trades gardes, WR=71.4% (vs baseline 46.1%)
+  test   seuil=0.65 :    9 trades gardes, WR=44.4% (vs baseline 46.1%)
+  test   AUC = 0.789
+
+=== TOP 15 FEATURES ===
+  risk_points                    103
+  retest_count                   62
+  quality                        55
+  score                          50
+  bars_group_to_validation       39
+  ob_strength                    29
+  sweep_strength                 29
+  bars_sweep_to_validation       27
+  has_breaker_kz                 15
+  rr                             11
+  kz_ny_lunch                    10
+  ob_group_size                  10
+  has_phase_expansion            8
+  has_open_midnight_respect      7
+  is_bullish                     6

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>TradingBot Trainer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-slate-900 text-slate-100">
+
+<div x-data="trainer()" x-init="boot()" class="flex h-screen overflow-hidden">
+
+  <!-- Sidebar gauche : historique sessions -->
+  <aside class="w-64 bg-slate-950 border-r border-slate-800 flex flex-col">
+    <div class="p-3 border-b border-slate-800">
+      <div class="text-xs uppercase text-slate-500 mb-1">Sessions training</div>
+      <div class="text-2xl font-bold" x-text="sessions.length"></div>
+      <div class="text-xs text-slate-400">
+        <span x-text="sessions.filter(s => s.reviewed).length"></span> reviewees
+      </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto">
+      <template x-for="s in sessions" :key="s.id">
+        <button @click="loadTrade(s.id)"
+          class="w-full text-left p-2 border-b border-slate-800 hover:bg-slate-800"
+          :class="current && current.id === s.id ? 'bg-slate-800' : ''">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400">#<span x-text="s.session_index"></span></span>
+            <span class="text-xs font-mono"
+              :class="s.direction === 'bullish' ? 'text-emerald-400' : 'text-rose-400'"
+              x-text="s.direction === 'bullish' ? '▲' : '▼'"></span>
+            <span class="text-xs font-bold"
+              :class="{
+                'text-emerald-400': s.algo_verdict === 'premium' || s.algo_verdict === 'good',
+                'text-amber-400':   s.algo_verdict === 'mediocre',
+                'text-orange-400':  s.algo_verdict === 'weak',
+                'text-rose-400':    s.algo_verdict === 'reject',
+              }"
+              x-text="s.score"></span>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-1" x-text="s.sampled_day.split('T')[0]"></div>
+          <div class="flex items-center gap-1 mt-0.5">
+            <span x-show="s.would_trade" class="text-[10px] text-emerald-500">●</span>
+            <span x-show="!s.would_trade" class="text-[10px] text-slate-600">○</span>
+            <span x-show="s.reviewed" class="text-[10px] text-blue-400 ml-auto">✎</span>
+          </div>
+        </button>
+      </template>
+    </div>
+
+    <div class="p-2 border-t border-slate-800 space-y-1">
+      <a href="/api/training/export/markdown" target="_blank"
+         class="block w-full text-center px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 rounded">
+        📋 Exporter logs (markdown)
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Empty state -->
+    <div x-show="!current" class="flex-1 flex items-center justify-center">
+      <div class="text-center">
+        <div class="text-2xl mb-4 text-slate-400">Mode entrainement</div>
+        <button @click="nextTrade()" :disabled="loading"
+          class="px-8 py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 rounded-lg text-lg font-semibold">
+          <span x-show="!loading">▶ Pioche un jour aleatoire</span>
+          <span x-show="loading">Scan en cours...</span>
+        </button>
+        <div class="mt-4 text-xs text-slate-500">
+          Le bot va piocher un jour au hasard, scanner, et te montrer son meilleur trade
+        </div>
+      </div>
+    </div>
+
+    <!-- Header -->
+    <header x-show="current" class="bg-slate-950 border-b border-slate-800 p-3 flex items-center gap-3 text-xs">
+      <button @click="prevTrade()" :disabled="!hasPrev"
+        class="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 rounded">
+        ← Precedent
+      </button>
+      <span class="text-slate-500">Trade #<span x-text="current?.session_index"></span> / <span x-text="sessions.length"></span></span>
+
+      <span class="text-slate-500" x-show="current?.skipped_empty_days > 0">
+        (<span x-text="current?.skipped_empty_days"></span> jours sans setup ignores)
+      </span>
+
+      <span class="mx-2 text-slate-700">|</span>
+
+      <span class="font-mono text-lg"
+        :class="current?.direction === 'bullish' ? 'text-emerald-400' : 'text-rose-400'"
+        x-text="current?.direction === 'bullish' ? 'LONG' : 'SHORT'"></span>
+      <span class="text-slate-400" x-text="current?.instrument"></span>
+      <span class="text-slate-500" x-text="fmtTime(current?.entry_time)"></span>
+
+      <span class="ml-4">Entry <span class="font-mono" x-text="current?.entry_price.toFixed(2)"></span></span>
+      <span><span class="text-rose-400">SL</span> <span class="font-mono" x-text="current?.stop_loss.toFixed(2)"></span></span>
+      <span><span class="text-emerald-400">TP</span> <span class="font-mono" x-text="current?.take_profit.toFixed(2)"></span></span>
+      <span>RR <span class="font-mono" x-text="current?.risk_reward.toFixed(2)"></span></span>
+
+      <span class="ml-auto flex items-center gap-2">
+        <template x-for="tf in ['H4','H1','M30','M15','M5','M1']" :key="tf">
+          <button @click="switchTf(tf)"
+            class="px-2 py-1 rounded border border-slate-700"
+            :class="currentTf === tf ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800'"
+            x-text="tf"></button>
+        </template>
+      </span>
+    </header>
+
+    <!-- Toolbar dessin -->
+    <div x-show="current" class="bg-slate-900 border-b border-slate-800 p-2 flex items-center gap-2 text-xs">
+      <span class="text-slate-500 uppercase">Dessine ce que le bot a rate :</span>
+      <template x-for="tool in tools" :key="tool.id">
+        <button @click="setTool(tool.id)" class="px-3 py-1 rounded border border-slate-700"
+          :class="currentTool === tool.id ? 'bg-purple-700 border-purple-500' : 'hover:bg-slate-800'">
+          <span x-text="tool.label"></span>
+        </button>
+      </template>
+      <button @click="clearDrawings()" class="ml-2 px-3 py-1 rounded border border-rose-900 text-rose-400 hover:bg-rose-950">
+        Effacer mes dessins
+      </button>
+    </div>
+
+    <!-- Chart + panneau analyse -->
+    <div x-show="current" class="flex-1 flex overflow-hidden">
+      <div class="flex-1 relative">
+        <div id="chart" class="absolute inset-0"></div>
+        <canvas id="overlay" class="absolute inset-0 pointer-events-none"></canvas>
+        <canvas id="drawing" class="absolute inset-0"
+                @mousedown="onMouseDown($event)"
+                @mousemove="onMouseMove($event)"
+                @mouseup="onMouseUp($event)"></canvas>
+      </div>
+
+      <!-- Panneau analyse complete -->
+      <aside class="w-96 bg-slate-950 border-l border-slate-800 overflow-y-auto p-3 text-xs">
+        <div class="mb-3 p-3 rounded bg-slate-900 border border-slate-800">
+          <div class="flex items-center justify-between">
+            <span class="uppercase text-slate-500 text-xs">Verdict bot</span>
+            <span class="font-bold text-lg"
+              :class="{
+                'text-emerald-400': current?.algo_verdict === 'premium' || current?.algo_verdict === 'good',
+                'text-amber-400':  current?.algo_verdict === 'mediocre',
+                'text-orange-400': current?.algo_verdict === 'weak',
+                'text-rose-400':   current?.algo_verdict === 'reject',
+              }"
+              x-text="current?.algo_verdict?.toUpperCase()"></span>
+          </div>
+          <div class="text-3xl font-bold mt-1" x-text="(current?.score || 0) + '/100'"></div>
+          <div class="text-xs mt-2" :class="current?.would_trade ? 'text-emerald-400' : 'text-rose-400'">
+            <span x-text="current?.would_trade ? '● Le bot AURAIT pris ce trade' : '○ Trade IGNORE par le bot'"></span>
+          </div>
+          <div class="text-xs mt-1 text-slate-400">
+            Outcome simule :
+            <span :class="{
+              'text-emerald-400': current?.status === 'win',
+              'text-rose-400':    current?.status === 'loss',
+              'text-slate-500':   current?.status === 'pending',
+            }" x-text="current?.status?.toUpperCase()"></span>
+            (<span x-text="current?.pnl?.toFixed(2)"></span>$)
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <div class="text-slate-500 uppercase text-xs mb-1">Filtres durs (obligatoires)</div>
+          <template x-for="hf in (current?.setup_analysis?.hard_filters || [])" :key="hf.name">
+            <div class="flex items-start gap-2 py-1 border-b border-slate-900">
+              <span class="text-base shrink-0" :class="hf.passed ? 'text-emerald-400' : 'text-rose-500'"
+                    x-text="hf.passed ? '✓' : '✗'"></span>
+              <div class="flex-1">
+                <div :class="hf.passed ? '' : 'text-rose-300'" x-text="hf.label"></div>
+                <div class="text-slate-500 text-[10px]" x-text="hf.detail"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <template x-for="cat in categories" :key="cat">
+          <div class="mb-3" x-show="factorsOfCategory(cat).length > 0">
+            <div class="text-slate-500 uppercase text-xs mb-1" x-text="categoryLabel(cat)"></div>
+            <template x-for="f in factorsOfCategory(cat)" :key="f.name">
+              <div class="flex items-start gap-2 py-1 border-b border-slate-900">
+                <span class="text-base shrink-0"
+                  :class="{
+                    'text-emerald-400': f.status === 'present',
+                    'text-amber-400':   f.status === 'warning',
+                    'text-slate-600':   f.status === 'absent' || f.status === 'neutral',
+                  }"
+                  x-text="f.status === 'present' ? '✓' : f.status === 'warning' ? '⚠' : '·'"></span>
+                <div class="flex-1">
+                  <div class="flex items-center justify-between">
+                    <span x-text="f.label"></span>
+                    <span class="font-mono ml-2"
+                      :class="f.applied_score > 0 ? 'text-emerald-400' : f.applied_score < 0 ? 'text-rose-400' : 'text-slate-600'"
+                      x-text="(f.applied_score > 0 ? '+' : '') + f.applied_score"></span>
+                  </div>
+                  <div class="text-slate-500 text-[10px]" x-text="f.detail"></div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </aside>
+    </div>
+
+    <!-- Feedback + actions -->
+    <div x-show="current" class="bg-slate-950 border-t border-slate-800 p-3">
+      <div class="flex gap-3">
+        <textarea x-model="feedback.comment"
+          class="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-sm"
+          rows="3"
+          placeholder="Ton feedback : pourquoi ce trade est valide / faux. Si tu as dessine, explique ce que tes zones representent. Plus tu en mets, mieux je calibrerai le bot."></textarea>
+
+        <div class="flex flex-col gap-2">
+          <button @click="saveFeedback()" :disabled="saving"
+            class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 rounded font-semibold">
+            <span x-text="saving ? 'Sauve...' : '💾 Enregistrer'"></span>
+          </button>
+          <button @click="saveAndNext()" :disabled="saving || loading"
+            class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 rounded font-semibold">
+            <span x-text="loading ? 'Scan...' : 'Sauve + Suivant ▶'"></span>
+          </button>
+        </div>
+      </div>
+      <div x-show="lastSaved" class="text-xs text-emerald-500 mt-2">
+        Feedback enregistre <span x-text="lastSaved"></span>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="/static/chart.js"></script>
+</body>
+</html>

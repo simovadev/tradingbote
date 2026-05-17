@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>TradingBot Labeling</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-slate-900 text-slate-100">
+
+<div x-data="labeler()" x-init="boot()" class="flex h-screen overflow-hidden">
+
+  <!-- Sidebar gauche -->
+  <aside class="w-80 bg-slate-950 border-r border-slate-800 flex flex-col">
+    <div class="p-3 border-b border-slate-800">
+      <div class="text-xs uppercase text-slate-500 mb-2">Mode Labelisation</div>
+
+      <div class="mb-3">
+        <div class="text-xs text-slate-400 mb-1">Actif</div>
+        <select x-model="currentInstrument" @change="onInstrumentChange()"
+          class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm">
+          <template x-for="inst in instruments" :key="inst">
+            <option :value="inst" x-text="inst"></option>
+          </template>
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <div class="text-xs text-slate-400 mb-1">Jour</div>
+        <input type="date" x-model="currentDay" @change="loadAll()"
+          class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm">
+      </div>
+
+      <div class="flex gap-1">
+        <button @click="randomDay()" class="flex-1 px-2 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 rounded">
+          🎲 Random
+        </button>
+        <button @click="nextInstrument()" class="flex-1 px-2 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded">
+          Actif ▶
+        </button>
+      </div>
+    </div>
+
+    <!-- Trades humains -->
+    <div class="border-b border-slate-800">
+      <div class="p-2 text-xs uppercase text-slate-500 bg-slate-900">
+        Tes trades (<span x-text="dayTrades.length"></span>)
+      </div>
+      <template x-for="t in dayTrades" :key="t.id">
+        <div @click="zoomToUserTrade(t)" class="p-2 border-t border-slate-800 text-xs cursor-pointer hover:bg-slate-800">
+          <div class="flex items-center justify-between">
+            <span class="font-mono"
+              :class="t.direction === 'bullish' ? 'text-emerald-400' : 'text-rose-400'"
+              x-text="t.direction === 'bullish' ? '▲ LONG' : '▼ SHORT'"></span>
+            <span class="px-2 py-0.5 rounded text-xs font-bold"
+              :class="{
+                'bg-emerald-900 text-emerald-300': t.outcome === 'win',
+                'bg-rose-900 text-rose-300': t.outcome === 'loss',
+                'bg-slate-700 text-slate-300': t.outcome === 'unknown',
+              }"
+              x-text="t.outcome.toUpperCase()"></span>
+          </div>
+          <div class="text-slate-400 mt-1">
+            E:<span class="text-slate-200" x-text="t.entry_price?.toFixed(2)"></span>
+            SL:<span class="text-rose-400" x-text="t.stop_loss?.toFixed(2)"></span>
+            TP:<span class="text-emerald-400" x-text="t.take_profit?.toFixed(2)"></span>
+          </div>
+          <div class="text-slate-500 mt-1 text-[10px] line-clamp-2" x-text="t.reasoning || '(pas de raison)'"></div>
+          <button @click.stop="deleteTrade(t.id)" class="text-rose-500 text-[10px] mt-1 hover:underline">
+            Supprimer
+          </button>
+        </div>
+      </template>
+    </div>
+
+    <!-- Trades ALGO -->
+    <div class="flex-1 overflow-y-auto">
+      <div class="p-2 text-xs uppercase text-slate-500 bg-slate-900 flex items-center justify-between">
+        <span>Bot (<span x-text="algoTrades.length"></span>)</span>
+        <label class="flex items-center gap-1 normal-case">
+          <input type="checkbox" x-model="showAlgoOnChart" @change="redrawAll()">
+          <span class="text-[10px]">Sur chart</span>
+        </label>
+      </div>
+      <template x-for="t in algoTrades" :key="t.id">
+        <button @click="copyAlgoToDraft(t)"
+          class="w-full text-left p-2 border-t border-slate-800 text-xs hover:bg-slate-800">
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-xs"
+              :class="t.direction === 'bullish' ? 'text-emerald-400' : 'text-rose-400'"
+              x-text="t.direction === 'bullish' ? '▲' : '▼'"></span>
+            <span class="text-xs font-bold"
+              :class="{
+                'text-emerald-400': t.verdict === 'premium' || t.verdict === 'good',
+                'text-amber-400':  t.verdict === 'mediocre',
+                'text-rose-400':   t.verdict === 'reject',
+              }"
+              x-text="t.score + '/100'"></span>
+            <span x-show="t.would_trade" class="text-emerald-500">●</span>
+            <span x-show="!t.would_trade" class="text-slate-600">○</span>
+          </div>
+          <div class="text-slate-400 mt-0.5 text-[10px]">
+            <span x-text="t.entry_time.slice(11, 16)"></span>
+            E:<span x-text="t.entry_price?.toFixed(2)"></span>
+            RR:<span x-text="t.risk_reward?.toFixed(2)"></span>
+          </div>
+          <div class="text-slate-500 text-[10px]" x-text="'Outcome: ' + (t.outcome || 'pending')"></div>
+        </button>
+      </template>
+      <div x-show="algoTrades.length === 0" class="p-3 text-xs text-slate-500">
+        Aucun trade algo.
+      </div>
+    </div>
+
+    <div class="p-2 border-t border-slate-800">
+      <a href="/api/labeling/export/markdown" target="_blank"
+        class="block w-full text-center px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 rounded">
+        📋 Export markdown
+      </a>
+      <a href="/" class="block w-full text-center px-3 py-1.5 mt-1 text-xs text-slate-500 hover:text-slate-300">
+        ← Mode review
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+
+    <header class="bg-slate-950 border-b border-slate-800 p-3 flex items-center gap-3 text-xs">
+      <div class="font-bold text-lg" x-text="currentInstrument"></div>
+      <div class="text-slate-400" x-text="currentDay"></div>
+      <span class="ml-4 text-slate-500" x-show="currentTool !== 'none'">
+        Mode : <span class="text-blue-400 font-bold" x-text="currentToolLabel()"></span>
+      </span>
+      <span x-show="hoveredCandle" class="text-slate-400 ml-2 text-[10px]">
+        <span x-text="hoveredCandle?.iso?.slice(11, 16)"></span>
+        H:<span x-text="hoveredCandle?.high?.toFixed(2)"></span>
+        L:<span x-text="hoveredCandle?.low?.toFixed(2)"></span>
+        C:<span x-text="hoveredCandle?.close?.toFixed(2)"></span>
+      </span>
+      <div class="ml-auto flex items-center gap-2">
+        <template x-for="tf in ['H4','H1','M30','M15','M5','M1']" :key="tf">
+          <button @click="switchTf(tf)"
+            class="px-2 py-1 rounded border border-slate-700"
+            :class="currentTf === tf ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800'"
+            x-text="tf"></button>
+        </template>
+      </div>
+    </header>
+
+    <!-- Toolbar dessin -->
+    <div class="bg-slate-900 border-b border-slate-800 p-2 flex items-center gap-2 text-xs flex-wrap">
+      <span class="text-slate-500 uppercase">Outils :</span>
+      <button @click="setTool('ob_candle')"
+        class="px-3 py-1 rounded border"
+        :class="currentTool === 'ob_candle' ? 'bg-amber-700 border-amber-500' : 'border-amber-900 hover:bg-amber-950'">
+        🟧 OB (click bougie)
+      </button>
+      <button @click="setTool('entry')"
+        class="px-3 py-1 rounded border"
+        :class="currentTool === 'entry' ? 'bg-blue-700 border-blue-500' : 'border-blue-900 hover:bg-blue-950'">
+        📏 Entry
+      </button>
+      <button @click="setTool('sl')"
+        class="px-3 py-1 rounded border"
+        :class="currentTool === 'sl' ? 'bg-rose-700 border-rose-500' : 'border-rose-900 hover:bg-rose-950'">
+        🔴 SL
+      </button>
+      <button @click="setTool('tp')"
+        class="px-3 py-1 rounded border"
+        :class="currentTool === 'tp' ? 'bg-emerald-700 border-emerald-500' : 'border-emerald-900 hover:bg-emerald-950'">
+        🟢 TP
+      </button>
+      <span class="ml-3 text-slate-500">Dir:</span>
+      <button @click="trade.direction = 'bullish'"
+        class="px-3 py-1 rounded border-2"
+        :class="trade.direction === 'bullish' ? 'bg-emerald-700 border-emerald-500' : 'border-emerald-900'">
+        ▲ LONG
+      </button>
+      <button @click="trade.direction = 'bearish'"
+        class="px-3 py-1 rounded border-2"
+        :class="trade.direction === 'bearish' ? 'bg-rose-700 border-rose-500' : 'border-rose-900'">
+        ▼ SHORT
+      </button>
+      <button @click="setTool('none')" class="px-3 py-1 rounded border border-slate-700">✋</button>
+      <button @click="resetTradeDraft()" class="px-3 py-1 rounded border border-slate-700 ml-auto">🗑 Reset</button>
+    </div>
+
+    <!-- Inputs prix -->
+    <div class="bg-slate-900 border-b border-slate-800 px-2 py-2 flex items-center gap-2 text-xs flex-wrap">
+      <span class="font-mono text-sm"
+        :class="trade.direction === 'bullish' ? 'text-emerald-400' : 'text-rose-400'"
+        x-text="trade.direction === 'bullish' ? 'LONG' : 'SHORT'"></span>
+      <span class="text-slate-500">Entry:</span>
+      <input type="number" step="0.01" x-model.number="trade.entry_price" @change="redrawAll()"
+        class="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono">
+      <span class="text-rose-400">SL:</span>
+      <input type="number" step="0.01" x-model.number="trade.stop_loss" @change="redrawAll()"
+        class="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono">
+      <span class="text-emerald-400">TP:</span>
+      <input type="number" step="0.01" x-model.number="trade.take_profit" @change="redrawAll()"
+        class="w-24 bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono">
+      <span class="text-slate-500">RR:</span>
+      <span class="font-mono font-bold" x-text="computedRR()?.toFixed(2) || '-'"></span>
+      <span class="ml-3 text-amber-500" x-show="trade.ob_candles.candles?.length > 0">
+        🟧 OB: <span x-text="trade.ob_candles.candles.length"></span> bougie(s)
+        [<span x-text="trade.ob_zone.low?.toFixed(2)"></span> -
+         <span x-text="trade.ob_zone.high?.toFixed(2)"></span>]
+      </span>
+    </div>
+
+    <!-- Chart : LE CONTENEUR DOIT être relative pour que les overlays internes soient bien positionnees -->
+    <div class="flex-1 relative bg-slate-950">
+      <div id="chart" class="absolute inset-0"></div>
+    </div>
+
+    <div class="bg-slate-950 border-t border-slate-800 p-3">
+      <div class="flex gap-3">
+        <textarea x-model="trade.reasoning"
+          class="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-sm"
+          rows="2"
+          placeholder="Pourquoi ce trade : sweep, OB M1 valide, FVG H1, etc."></textarea>
+        <button @click="saveTrade()" :disabled="!canSave() || saving"
+          class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 rounded font-semibold whitespace-nowrap">
+          <span x-text="saving ? 'Sauve...' : '💾 Enregistrer'"></span>
+        </button>
+      </div>
+      <div class="text-xs text-slate-500 mt-1" x-show="!canSave()">
+        Pour enregistrer : direction + entry + SL + TP requis.
+      </div>
+      <div x-show="lastSavedMsg" class="text-xs text-emerald-400 mt-1" x-text="lastSavedMsg"></div>
+    </div>
+  </main>
+</div>
+
+<script src="/static/labeling.js"></script>
+</body>
+</html>

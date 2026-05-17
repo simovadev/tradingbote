@@ -1,0 +1,7 @@
+/* Lightweight Charts dark theme */
+
+#chart {
+  background: #0f172a;
+}
+
+button:focus { outline: none; }

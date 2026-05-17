@@ -1,0 +1,14 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pandas==2.2.3
+numpy==2.1.3
+pyarrow==18.0.0
+sqlalchemy==2.0.36
+pydantic==2.9.2
+python-multipart==0.0.12
+dukascopy-python>=4.0.0
+jinja2==3.1.4
+MetaTrader5>=5.0.5735
+lightgbm>=4.6.0
+scikit-learn>=1.5.0
+requests>=2.32.0
