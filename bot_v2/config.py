@@ -151,7 +151,7 @@ SMT_PAIRS: dict[str, list[tuple[str, str]]] = {
     "XAUUSD": [("XAGUSD", "positive"), ("DXY", "inverse")],
     "NAS100": [("SPX500", "positive"), ("GER40", "positive")],
     "GER40":  [("SPX500", "positive"), ("NAS100", "positive")],
-    "USOUSD": [("UKOIL", "positive")],
+    "USOUSD": [],   # UKOIL pas dispo Vantage + USOUSD abandonne
     # === Forex (correlations ICT classiques) ===
     "EURUSD": [("GBPUSD", "positive"), ("DXY", "inverse")],
     "GBPUSD": [("EURUSD", "positive"), ("DXY", "inverse")],
