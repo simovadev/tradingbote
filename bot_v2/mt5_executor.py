@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 BROKER_SYMBOL_MAP: dict[str, str] = {
     "XAUUSD": "XAUUSD+",   # Vantage RAW ECN
     "SPX500": "SP500",     # Vantage : sans le X
-    # DXY n'existe pas sur Vantage -> SMT correlation DXY desactivee
+    "DXY":    "USDX",      # Vantage : Dollar Index CFD s'appelle USDX
     # Les autres symboles sont identiques (NAS100, GER40, BTCUSD, EURUSD, etc.)
 }
 
