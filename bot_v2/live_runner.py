@@ -257,17 +257,15 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     ob = setup_dict["ob"]
     setup = r.trade_setup
 
-    # Calcul lots selon balance
+    # Calcul lots selon balance (utilise les VRAIES valeurs MT5 du broker)
     risk_pct = get_risk_pct(balance)
-    # On utilise compute_position_size qui retourne (lots, risk_usd) base sur balance=60, risk=0.10
-    # -> on recalcule manuellement les lots pour le risk reel
     try:
         info = mt5_exec.symbol_info(instrument)
         if info is None:
             log.error(f"Symbol info None pour {instrument}")
             return False
 
-        # Distance SL en points (= units du symbole)
+        # Distance SL en unites de prix
         sl_distance = abs(setup.entry_price - setup.stop_loss)
         if sl_distance == 0:
             log.error(f"SL distance = 0 sur {instrument}")
@@ -275,12 +273,29 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
 
         # Risk en EUR (compte EUR)
         risk_eur = balance * risk_pct
-        # tick_value du config (en USD) -- approximation : EUR ~ USD
-        tick_value = INSTRUMENTS[instrument]["tick_value"]
-        risk_per_lot = sl_distance * tick_value
+
+        # === NOUVEAU (user 2026-05-18) : utilise les VRAIES valeurs MT5 du broker ===
+        # info.trade_tick_value = gain en devise compte pour 1 lot et 1 tick
+        # info.trade_tick_size  = taille minimum de mouvement du prix (ex: 0.01 XAU)
+        tick_value_real = getattr(info, "trade_tick_value", 0)
+        tick_size_real = getattr(info, "trade_tick_size", 0)
+
+        if tick_value_real > 0 and tick_size_real > 0:
+            # Calcul precis avec valeurs MT5 reelles (en devise du compte, donc EUR)
+            n_ticks_sl = sl_distance / tick_size_real
+            risk_per_lot = n_ticks_sl * tick_value_real
+            calcul_source = "MT5_real"
+        else:
+            # Fallback : config hardcodee (en USD, approx EUR=USD)
+            tick_value_fallback = INSTRUMENTS[instrument]["tick_value"]
+            risk_per_lot = sl_distance * tick_value_fallback
+            calcul_source = "config_fallback"
+
         if risk_per_lot == 0:
             return False
         lots = risk_eur / risk_per_lot
+        log.debug(f"{instrument} lots calc : sl_dist={sl_distance}, risk_per_lot={risk_per_lot:.2f}, "
+                  f"lots={lots:.4f} [source={calcul_source}]")
         # Arrondi au volume_step
         vol_step = info.volume_step
         lots = max(info.volume_min, round(lots / vol_step) * vol_step)
@@ -292,17 +307,25 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
             log.warning(f"Lots calcule {lots} < min {info.volume_min} sur {instrument}, SKIP")
             return False
 
-        # === SECURITE 1 : Verifie que la perte max sur SL <= 1.5 x risk vise (user 2026-05-18) ===
-        # Protege contre les calculs de lots foireux (tick_value EUR/USD mismatch)
-        perte_si_sl_usd = sl_distance * tick_value * lots
-        # Approx EUR ~ USD pour comparaison
-        if perte_si_sl_usd > risk_eur * 1.5:
+        # === SECURITE 1 : Verifie que la perte max sur SL <= 1.5 x risk vise ===
+        # Recalcul avec les MEMES valeurs que le calcul des lots (coherence)
+        if tick_value_real > 0 and tick_size_real > 0:
+            perte_si_sl = (sl_distance / tick_size_real) * tick_value_real * lots
+        else:
+            perte_si_sl = sl_distance * INSTRUMENTS[instrument]["tick_value"] * lots
+
+        if perte_si_sl > risk_eur * 1.5:
             log.error(
-                f"REJET {instrument} : perte SL={perte_si_sl_usd:.2f}$ > 1.5x risk_eur ({risk_eur*1.5:.2f}€). "
-                f"Lots={lots} probablement faux (tick_value mismatch?). SKIP."
+                f"REJET {instrument} : perte SL={perte_si_sl:.2f} > 1.5x risk ({risk_eur*1.5:.2f}). "
+                f"Lots={lots} probablement faux. SKIP."
             )
             state.log_event("WARN", f"Lots foireux {instrument} : skip")
             return False
+
+        log.info(
+            f"{instrument} : lots={lots}, perte_max_SL={perte_si_sl:.2f}€ "
+            f"(risk vise={risk_eur:.2f}€, source={calcul_source})"
+        )
 
         # === SECURITE 2 : Verifie margin disponible (max 80% balance utilisable) ===
         # Empeche d'avoir tous les fonds bloques en margin sur 1 trade
