@@ -54,8 +54,8 @@ LIVE_ASSETS = ["XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD", "AUDUS
 TEST_MODE_ASSETS = ["XAUUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
 TEST_MODE_THRESHOLD = 50.0  # Balance < 50€ = mode test
 
-# Scan interval
-SCAN_INTERVAL_SEC = 30
+# Scan interval (user 2026-05-18 : 30s -> 15s pour plus de reactivite)
+SCAN_INTERVAL_SEC = 15
 
 # Cooldown par actif
 COOLDOWN_SEC = 15 * 60
@@ -191,10 +191,11 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState) -> list
     )
     obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
-    # 3. Filtre : on ne s'interesse qu'aux OB RECENTS (10 dernieres minutes)
-    # En live, les vieux OB sont deja traites (ou rates), inutile de re-scan tout
+    # 3. Filtre : on ne s'interesse qu'aux OB RECENTS (user 2026-05-18 : 10 min -> 60 min)
+    # OB+MSS Vizion prennent souvent 15-30 min entre OB et confirmation MSS finale
+    # Avec cooldown 15min/actif, pas de risque de re-prendre le meme setup
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=10)
+    recent_cutoff = now - pd.Timedelta(minutes=60)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if not obs_recent:
