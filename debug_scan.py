@@ -71,10 +71,15 @@ def main():
 
         print(f"  OB detectes : {len(obs)}, MSS : {len(mss_setups)}, OB+MSS confirmes : {len(obs_confirmed)}")
 
-        # OB des 10 dernieres minutes
-        cutoff = last_ts - pd.Timedelta(minutes=10)
+        # OB des X dernieres minutes (teste 10, 30, 60, 120 min)
+        for minutes in [10, 30, 60, 120]:
+            cutoff = last_ts - pd.Timedelta(minutes=minutes)
+            recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff]
+            print(f"  OB+MSS recents (<{minutes}min) : {len(recent)}")
+
+        # Garde la fenetre 60min pour la suite (nouveau cutoff bot)
+        cutoff = last_ts - pd.Timedelta(minutes=60)
         recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff]
-        print(f"  OB+MSS recents (<10min) : {len(recent)}")
 
         # Si on a des recents, voir pourquoi rejetes
         if recent:
