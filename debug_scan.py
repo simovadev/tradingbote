@@ -24,7 +24,12 @@ from bot_v2.mt5_executor import MT5Executor
 from bot_v2.pipeline import evaluate_ob
 
 
-ASSETS = ["XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
+ASSETS = [
+    # Phase 1-3 (8 actifs)
+    "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY",
+    # Phase 4 (user 2026-05-18) : 5 indices + 2 forex
+    "SP500", "DJ30", "UK100", "FRA40", "JP225", "USDCAD", "USDCHF",
+]
 
 
 def load_model(instrument):
