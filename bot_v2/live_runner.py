@@ -48,10 +48,17 @@ log = logging.getLogger("live")
 # ========== CONFIG LIVE ==========
 
 # Actifs traders en live (alignement avec backtest valide)
-LIVE_ASSETS = ["XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
+# Phase 4 (user 2026-05-18) : +7 nouveaux actifs (SP500, DJ30, UK100, FRA40, JP225, USDCAD, USDCHF)
+# NZDUSD ecarte (WR Test 53.5% trop faible)
+LIVE_ASSETS = [
+    # Phase 1-3 (8 actifs valides)
+    "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY",
+    # Phase 4 (5 indices + 2 forex)
+    "SP500", "DJ30", "UK100", "FRA40", "JP225", "USDCAD", "USDCHF",
+]
 
 # Reduire la liste en mode test (5€ : pas assez pour BTC/NAS/GER lot min)
-TEST_MODE_ASSETS = ["XAUUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
+TEST_MODE_ASSETS = ["XAUUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "USDCAD", "USDCHF"]
 TEST_MODE_THRESHOLD = 50.0  # Balance < 50€ = mode test
 
 # Scan interval (user 2026-05-18 : 30s -> 15s pour plus de reactivite)

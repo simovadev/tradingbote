@@ -37,6 +37,14 @@ _MODELS_BY_INSTRUMENT: dict[str, Path] = {
     "GBPUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_GBPUSD.pkl"),
     "AUDUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_AUDUSD.pkl"),
     "USDJPY": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_USDJPY.pkl"),
+    # Phase 4 (user 2026-05-18) : 7 nouveaux actifs (NZDUSD ecarte WR 53.5%)
+    "SP500":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_SP500.pkl"),
+    "DJ30":   Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_DJ30.pkl"),
+    "UK100":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_UK100.pkl"),
+    "FRA40":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_FRA40.pkl"),
+    "JP225":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_JP225.pkl"),
+    "USDCAD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_USDCAD.pkl"),
+    "USDCHF": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_USDCHF.pkl"),
     # USOUSD abandonne 2026-05-17 : voir BILAN_USOUSD_ABANDON.md
 }
 _FEATURES_BY_INSTRUMENT: dict[str, Path] = {
@@ -48,6 +56,14 @@ _FEATURES_BY_INSTRUMENT: dict[str, Path] = {
     "GBPUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_GBPUSD.json"),
     "AUDUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_AUDUSD.json"),
     "USDJPY": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_USDJPY.json"),
+    # Phase 4 (user 2026-05-18)
+    "SP500":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_SP500.json"),
+    "DJ30":   Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_DJ30.json"),
+    "UK100":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_UK100.json"),
+    "FRA40":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_FRA40.json"),
+    "JP225":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_JP225.json"),
+    "USDCAD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_USDCAD.json"),
+    "USDCHF": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_USDCHF.json"),
 }
 
 # Models specifiques par (INSTRUMENT, TF) — user 2026-05-16
@@ -71,6 +87,14 @@ ML_THRESHOLDS: dict[str, float] = {
     "GBPUSD": 0.55,  # TEST WR 69.9% @0.55, AUC 0.768
     "AUDUSD": 0.55,  # TEST WR 62.7% @0.55, AUC 0.726
     "USDJPY": 0.55,  # TEST WR 59.8% @0.55, AUC 0.765
+    # Phase 4 (user 2026-05-18) - seuils bases sur Test OOS 8.5 mois
+    "SP500":  0.60,  # TEST WR 66.0% @0.60, AUC 0.719
+    "DJ30":   0.60,  # TEST WR 66.0% @0.60, AUC 0.736
+    "UK100":  0.60,  # TEST WR 71.7% @0.60, AUC 0.783 (best)
+    "FRA40":  0.60,  # TEST WR 67.8% @0.60, AUC 0.760
+    "JP225":  0.60,  # TEST WR 70.0% @0.60, AUC 0.788
+    "USDCAD": 0.55,  # TEST WR 63.6% @0.55, AUC 0.805 (best AUC)
+    "USDCHF": 0.55,  # TEST WR 67.6% @0.55, AUC 0.771
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {

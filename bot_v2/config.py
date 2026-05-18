@@ -67,7 +67,65 @@ INSTRUMENTS: dict[str, dict] = {
         "role": "primary",
         "type": "crypto",
     },
-    # === FOREX MAJORS ===
+    # === NOUVEAUX INDICES (user 2026-05-18) ===
+    "SP500": {
+        "duka": "INSTRUMENT_IDX_AMERICA_E_SANDP_500",
+        "tick_value": 1.0,
+        "min_sl_points": 5.0,
+        "label": "S&P 500",
+        "role": "primary",
+        "type": "index",
+    },
+    "DJ30": {
+        "duka": "INSTRUMENT_IDX_AMERICA_E_D_J_IND",
+        "tick_value": 1.0,
+        "min_sl_points": 20.0,
+        "label": "Dow Jones 30",
+        "role": "primary",
+        "type": "index",
+    },
+    "UK100": {
+        "duka": "INSTRUMENT_IDX_EUROPE_E_FUTSEE_100",
+        "tick_value": 1.0,
+        "min_sl_points": 15.0,
+        "label": "FTSE 100",
+        "role": "primary",
+        "type": "index",
+    },
+    "FRA40": {
+        "duka": "INSTRUMENT_IDX_EUROPE_E_CAAC_40",
+        "tick_value": 1.0,
+        "min_sl_points": 15.0,
+        "label": "CAC 40",
+        "role": "primary",
+        "type": "index",
+    },
+    "JP225": {
+        "duka": "INSTRUMENT_IDX_ASIA_E_N225JAP",
+        "tick_value": 1.0,
+        "min_sl_points": 50.0,
+        "label": "Nikkei 225",
+        "role": "primary",
+        "type": "index",
+    },
+    # === NOUVEAUX FOREX MAJORS + CROSSES (user 2026-05-18) ===
+    "USDCAD": {
+        "duka": "INSTRUMENT_FX_MAJORS_USD_CAD",
+        "tick_value": 100000.0,
+        "min_sl_points": 0.0010,
+        "label": "USD/CAD",
+        "role": "primary",
+        "type": "forex",
+    },
+    "USDCHF": {
+        "duka": "INSTRUMENT_FX_MAJORS_USD_CHF",
+        "tick_value": 100000.0,
+        "min_sl_points": 0.0010,
+        "label": "USD/CHF",
+        "role": "primary",
+        "type": "forex",
+    },
+    # === FOREX MAJORS (smt_only desormais reactives) ===
     # === FOREX MAJORS ===
     # Decision user 2026-05-15 : DESACTIVES (role=smt_only) car WR catastrophique
     # en backtest (17-24% sur AUDUSD/USDJPY/EURUSD). Restent disponibles pour SMT.

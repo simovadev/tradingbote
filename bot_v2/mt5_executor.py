@@ -28,10 +28,20 @@ log = logging.getLogger(__name__)
 # Certains brokers ajoutent un suffixe (Vantage = "+" sur XAUUSD RAW ECN).
 # Le bot utilise le nom standard (XAUUSD) en interne, on traduit a la sortie/entree.
 BROKER_SYMBOL_MAP: dict[str, str] = {
-    "XAUUSD": "XAUUSD+",   # Vantage RAW ECN
-    "SPX500": "SP500",     # Vantage : sans le X
-    "DXY":    "USDX",      # Vantage : Dollar Index CFD s'appelle USDX
-    # Les autres symboles sont identiques (NAS100, GER40, BTCUSD, EURUSD, etc.)
+    # === ACTIFS V1 (deja branchees) ===
+    "XAUUSD": "XAUUSD+",   # Vantage RAW ECN : suffixe +
+    "SPX500": "SP500",     # Vantage : sans le X (utilise pour SMT NAS/GER)
+    "DXY":    "USDX",      # Vantage : Dollar Index CFD
+    # === ACTIFS V2 ajoutes 2026-05-18 (user demande) ===
+    # Indices : pas de suffixe Vantage
+    "DJ30":     "DJ30",
+    "UK100":    "UK100",
+    "FRA40":    "FRA40",
+    "JP225":    "Nikkei225",   # ATTENTION : nom different chez Vantage
+    # Forex majeurs USD : suffixe + sur RAW ECN
+    "USDCAD":   "USDCAD+",
+    "USDCHF":   "USDCHF+",
+    # Les autres symboles principaux restent identiques (NAS100, GER40, BTCUSD, EURUSD, etc.)
 }
 
 
