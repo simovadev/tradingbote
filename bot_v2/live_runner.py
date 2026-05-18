@@ -291,6 +291,32 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         if lots < info.volume_min:
             log.warning(f"Lots calcule {lots} < min {info.volume_min} sur {instrument}, SKIP")
             return False
+
+        # === SECURITE 1 : Verifie que la perte max sur SL <= 1.5 x risk vise (user 2026-05-18) ===
+        # Protege contre les calculs de lots foireux (tick_value EUR/USD mismatch)
+        perte_si_sl_usd = sl_distance * tick_value * lots
+        # Approx EUR ~ USD pour comparaison
+        if perte_si_sl_usd > risk_eur * 1.5:
+            log.error(
+                f"REJET {instrument} : perte SL={perte_si_sl_usd:.2f}$ > 1.5x risk_eur ({risk_eur*1.5:.2f}€). "
+                f"Lots={lots} probablement faux (tick_value mismatch?). SKIP."
+            )
+            state.log_event("WARN", f"Lots foireux {instrument} : skip")
+            return False
+
+        # === SECURITE 2 : Verifie margin disponible (max 80% balance utilisable) ===
+        # Empeche d'avoir tous les fonds bloques en margin sur 1 trade
+        try:
+            margin_required = info.margin_initial * lots if info.margin_initial > 0 else None
+            if margin_required is not None:
+                if margin_required > balance * 0.8:
+                    log.error(
+                        f"REJET {instrument} : margin requis {margin_required:.2f}€ > 80% balance ({balance*0.8:.2f}€). SKIP."
+                    )
+                    return False
+        except Exception:
+            pass  # Pas critique si margin_initial pas dispo
+
     except Exception as e:
         log.error(f"Calc lots error {instrument}: {e}")
         return False
