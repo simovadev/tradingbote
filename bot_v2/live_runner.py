@@ -414,16 +414,26 @@ def reconcile_closed_trades(mt5_exec: MT5Executor, state: LiveState):
     to_ts = pd.Timestamp.now(tz="UTC")
     deals = mt5_exec.get_closed_deals(from_ts, to_ts, magic=BOT_MAGIC)
 
-    # Index par position_id
+    # Index par position_id ET par order (Vantage utilise parfois "order" pas "position_id")
     deals_by_pos = {}
+    deals_by_order = {}
     for d in deals:
         deals_by_pos.setdefault(d["position_id"], []).append(d)
+        deals_by_order.setdefault(d.get("order", 0), []).append(d)
 
     for ticket in closed_tickets:
-        # ticket d'ouverture = position_id parent
-        related = deals_by_pos.get(ticket, [])
+        # Cherche d'abord par position_id, puis par order ID en fallback
+        related = deals_by_pos.get(ticket, []) or deals_by_order.get(ticket, [])
         if not related:
-            log.warning(f"Pas de deals trouves pour ticket {ticket}, skip reconcile")
+            # Apres 5 min sans trouver, on marque le trade comme ferme par defaut (orphan)
+            # pour eviter la boucle de warnings infinie
+            log.warning(f"Pas de deals trouves pour ticket {ticket}, mark as orphan")
+            state.update_trade_closed(
+                ticket=ticket,
+                closed_ts=pd.Timestamp.now(tz="UTC"),
+                outcome="ORPHAN",
+                pnl_real=0.0,
+            )
             continue
 
         # PnL net = somme des profits des deals lies a la position

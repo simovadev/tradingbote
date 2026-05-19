@@ -348,6 +348,7 @@ class MT5Executor:
             out.append({
                 "ticket": d.ticket,
                 "position_id": d.position_id,
+                "order": d.order,  # ID ordre (peut differer du ticket sur certains brokers)
                 "symbol": d.symbol,
                 "type": d.type,
                 "volume": d.volume,
