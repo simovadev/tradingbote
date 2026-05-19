@@ -192,14 +192,15 @@ def evaluate_ob(
             res.confluences.append("KZ_premium")
 
     # 2-bis. SESSION PLAY (continuation ou reversal selon mvt deja fait)
-    # Iter 17 : session_play_score == 0 (pas de direction session claire) = REJET.
-    # Iter 32 REVERT post-OOS : on retire le seuil >=10 (overfit sur 7j).
+    # V3.5 (2026-05-19) : session_score == 0 n'est plus un REJET mais un malus -8.
+    # Raison : trop de bons OB rejetes en debut de session (avant qu'une direction soit claire).
     session_ctx = get_session_context(df_ltf, ob.validation_ts)
     session_score = session_play_score(session_ctx, ob.direction)
     if session_score == 0:
-        res.rejection_reason = "Session sans direction claire (iter 17)"
-        return res
-    res.score += session_score
+        res.score -= 8
+        res.confluences.append("session_sans_direction_malus")
+    else:
+        res.score += session_score
     if session_ctx.session_direction == ob.direction:
         res.confluences.append(f"session_continuation_{session_ctx.session_name}")
     else:
@@ -242,27 +243,33 @@ def evaluate_ob(
         tolerance_pct=tol_pct, obs_htf_cache=obs_htf_cache,
     )
     res.parent_ob = parent_ob
+    # V3.5 (2026-05-19) : parent OB HTF absent n'est plus REJET mais malus -15.
+    # Raison : tous les OB LTF n'ont pas forcement un OB HTF de meme direction recent.
+    # Le ML apprendra que les setups sans parent OB ont moins de chances.
     if parent_ob is None:
         res.htf_alignment_ok = False
-        res.rejection_reason = f"Pas de contexte OB {htf_name} dans la direction {ob.direction}"
-        return res
-    res.htf_alignment_ok = True
-    res.score += 20
-    res.confluences.append(f"parent_ob_{htf_name}")
+        res.score -= 15
+        res.confluences.append(f"no_parent_ob_{htf_name}_malus")
+    else:
+        res.htf_alignment_ok = True
+        res.score += 20
+        res.confluences.append(f"parent_ob_{htf_name}")
 
-    if df_htf2 is not None:
+    # V3.5 (2026-05-19) : grand-parent OB n'est plus REJET, juste bonus si present.
+    # Raison : exiger une chaine TF complete M1->M15->H1 perd ~30% des setups valides.
+    if df_htf2 is not None and parent_ob is not None:
         gp_tol = tol_pct * 2
         obs_htf2_cache = cache.get("obs_htf2") if cache else None
         grandparent_ob = _find_parent_ob(
             parent_ob, df_htf, df_htf2, htf_name, tolerance_pct=gp_tol,
             obs_htf_cache=obs_htf2_cache,
         )
-        if grandparent_ob is None:
-            res.htf_alignment_ok = False
-            res.rejection_reason = f"Pas de contexte OB {htf2_name} grand-parent (chaine TF Vizion brisee)"
-            return res
-        res.score += 15
-        res.confluences.append(f"grandparent_ob_{htf2_name}")
+        if grandparent_ob is not None:
+            res.score += 15
+            res.confluences.append(f"grandparent_ob_{htf2_name}")
+        else:
+            res.score -= 5
+            res.confluences.append(f"no_grandparent_{htf2_name}_malus")
 
     # ========== 4. DISCOUNT / PREMIUM ==========
     # Bible §6.2 : zone calculee sur le DERNIER MOUVEMENT DIRECTIONNEL PROPRE.
@@ -285,14 +292,18 @@ def evaluate_ob(
         )
     else:
         in_good_zone = True  # range nul -> on laisse passer
+    # V3.5 (2026-05-19) : mauvaise zone P/D n'est plus REJET mais malus -10.
+    # Raison : 30-50% des OB tombent en mauvaise zone Fibo, mais certains
+    # peuvent quand meme fonctionner (le ML decidera).
     if not in_good_zone:
         res.discount_premium_ok = False
+        res.score -= 10
         zone = fib.zone_of(ob_mid)
-        res.rejection_reason = f"OB {ob.direction} en zone {zone} (mauvaise zone)"
-        return res
-    res.discount_premium_ok = True
-    res.score += 15
-    res.confluences.append(f"zone={fib.zone_of(ob_mid)}")
+        res.confluences.append(f"mauvaise_zone_{zone}_malus")
+    else:
+        res.discount_premium_ok = True
+        res.score += 15
+        res.confluences.append(f"zone={fib.zone_of(ob_mid)}")
 
     # ========== BONUS : PO3 (HTF + grand-parent) ==========
     htf_bar = _get_htf_bar_containing(df_htf, ob.validation_ts)
@@ -449,6 +460,9 @@ def evaluate_ob(
     # validation = high probability". La bougie qui valide l'OB doit etre la
     # bougie centrale d'un FVG meme sens.
     # Iter 9 : sync OBLIGATOIRE (avant : juste bonus +12).
+    # V3.5 (2026-05-19) : FVG sync n'est plus OBLIGATOIRE mais BONUS.
+    # Raison : exiger une FVG dans ±1 bougie de validation OB rejette 60% des setups.
+    # Beaucoup d'OB valides n'ont pas de FVG sync mais marchent (le ML decidera).
     fvgs_for_sync = cache["fvgs_ltf"] if cache and "fvgs_ltf" in cache else detect_fvg(df_ltf)
     sync_found = False
     for fvg in fvgs_for_sync:
@@ -460,8 +474,8 @@ def evaluate_ob(
             res.confluences.append("OB_FVG_sync_high_proba")
             break
     if not sync_found:
-        res.rejection_reason = "Pas de FVG sync avec validation OB (iter 9)"
-        return res
+        res.score -= 5
+        res.confluences.append("no_FVG_sync_malus")
 
     # ========== 5. QUALITE AVANCEE (Unicorn, force OB, retests...) ==========
     swing_strength = get_param(instrument, "swing_strength_m1", 2)

@@ -126,16 +126,25 @@ def compute_sweep_strength(
         score += 1
 
     # Critere 3 : multi-liquidite (plusieurs swings au meme niveau pris en meme temps)
+    # Fix 2026-05-19 : tolerance 0.001 etait sur le PRIX (0.1%), valeur trop large
+    # pour XAUUSD a 2000$ (= 2$ tolerance, capture quasi-tous les swings).
+    # Et on ne filtrait pas le swing lui-meme (s.index != swing.index).
     sweep_bar = df.iloc[sweep.sweep_index]
     multi = False
+    # Tolerance en ATR : 0.5x ATR du sweep (plus realiste que % du prix)
+    if "atr" in df.columns:
+        atr_at_sweep = df.iloc[sweep.sweep_index].get("atr", 0) or 0
+    else:
+        atr_at_sweep = 0
+    tol_price = max(atr_at_sweep * 0.3, swing.price * 0.0005)  # 0.05% min, 0.3xATR max
     same_side_swings = [
         s for s in swings
         if s.kind == swing.kind
         and s.index < sweep.sweep_index
-        and abs(s.price - swing.price) / swing.price < 0.001  # 0.1% tolerance
+        and s.index != swing.index  # exclut le swing lui-meme
+        and abs(s.price - swing.price) <= tol_price
     ]
     if len(same_side_swings) >= 2:
-        # 2+ swings au meme niveau pris
         multi = True
         score += 3
     elif len(same_side_swings) >= 1:
