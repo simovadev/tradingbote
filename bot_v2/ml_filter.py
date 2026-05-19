@@ -27,43 +27,41 @@ _FEATURES_BY_TF: dict[str, Path] = {
     "M5": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_M5.json"),
 }
 
-# Models specifiques par INSTRUMENT (user 2026-05-16 : multi-asset)
+# V4 (user 2026-05-20) : Models V3.5 Admiral 8 ans pour 14 actifs
+# WR @ 0.70 entre 73% et 80%, AUC 0.78-0.81
+_MBASE = "c:/Users/Shadow/TradingBot/bot_v2"
 _MODELS_BY_INSTRUMENT: dict[str, Path] = {
-    "XAUUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_XAUUSD.pkl"),
-    "NAS100": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_NAS100.pkl"),
-    "GER40":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_GER40.pkl"),
-    "BTCUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_BTCUSD.pkl"),
-    "EURUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_EURUSD.pkl"),
-    "GBPUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_GBPUSD.pkl"),
-    "AUDUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_AUDUSD.pkl"),
-    "USDJPY": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_USDJPY.pkl"),
-    # Phase 4 (user 2026-05-18) : 7 nouveaux actifs (NZDUSD ecarte WR 53.5%)
-    "SP500":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_SP500.pkl"),
-    "DJ30":   Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_DJ30.pkl"),
-    "UK100":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_UK100.pkl"),
-    "FRA40":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_FRA40.pkl"),
-    "JP225":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_JP225.pkl"),
-    "USDCAD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_USDCAD.pkl"),
-    "USDCHF": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_model_USDCHF.pkl"),
-    # USOUSD abandonne 2026-05-17 : voir BILAN_USOUSD_ABANDON.md
+    "XAUUSD": Path(f"{_MBASE}/ml_model_XAUUSD_admiral_v3_5.pkl"),
+    "NAS100": Path(f"{_MBASE}/ml_model_NAS100_admiral_v3_5.pkl"),
+    "GER40":  Path(f"{_MBASE}/ml_model_GER40_admiral_v3_5.pkl"),
+    "BTCUSD": Path(f"{_MBASE}/ml_model_BTCUSD_admiral_v3_5.pkl"),
+    "EURUSD": Path(f"{_MBASE}/ml_model_EURUSD_admiral_v3_5.pkl"),
+    "GBPUSD": Path(f"{_MBASE}/ml_model_GBPUSD_admiral_v3_5.pkl"),
+    "AUDUSD": Path(f"{_MBASE}/ml_model_AUDUSD_admiral_v3_5.pkl"),
+    "USDJPY": Path(f"{_MBASE}/ml_model_USDJPY_admiral_v3_5.pkl"),
+    "SP500":  Path(f"{_MBASE}/ml_model_SP500_admiral_v3_5.pkl"),
+    "DJ30":   Path(f"{_MBASE}/ml_model_DJ30_admiral_v3_5.pkl"),
+    "UK100":  Path(f"{_MBASE}/ml_model_UK100_admiral_v3_5.pkl"),
+    "FRA40":  Path(f"{_MBASE}/ml_model_FRA40_admiral_v3_5.pkl"),
+    "USDCAD": Path(f"{_MBASE}/ml_model_USDCAD_admiral_v3_5.pkl"),
+    "USDCHF": Path(f"{_MBASE}/ml_model_USDCHF_admiral_v3_5.pkl"),
+    # JP225 desactive (ecart Duka/Vantage trop grand)
 }
 _FEATURES_BY_INSTRUMENT: dict[str, Path] = {
-    "XAUUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_XAUUSD.json"),
-    "NAS100": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_NAS100.json"),
-    "GER40":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_GER40.json"),
-    "BTCUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_BTCUSD.json"),
-    "EURUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_EURUSD.json"),
-    "GBPUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_GBPUSD.json"),
-    "AUDUSD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_AUDUSD.json"),
-    "USDJPY": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_USDJPY.json"),
-    # Phase 4 (user 2026-05-18)
-    "SP500":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_SP500.json"),
-    "DJ30":   Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_DJ30.json"),
-    "UK100":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_UK100.json"),
-    "FRA40":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_FRA40.json"),
-    "JP225":  Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_JP225.json"),
-    "USDCAD": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_USDCAD.json"),
-    "USDCHF": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_USDCHF.json"),
+    "XAUUSD": Path(f"{_MBASE}/ml_features_XAUUSD_admiral_v3_5.json"),
+    "NAS100": Path(f"{_MBASE}/ml_features_NAS100_admiral_v3_5.json"),
+    "GER40":  Path(f"{_MBASE}/ml_features_GER40_admiral_v3_5.json"),
+    "BTCUSD": Path(f"{_MBASE}/ml_features_BTCUSD_admiral_v3_5.json"),
+    "EURUSD": Path(f"{_MBASE}/ml_features_EURUSD_admiral_v3_5.json"),
+    "GBPUSD": Path(f"{_MBASE}/ml_features_GBPUSD_admiral_v3_5.json"),
+    "AUDUSD": Path(f"{_MBASE}/ml_features_AUDUSD_admiral_v3_5.json"),
+    "USDJPY": Path(f"{_MBASE}/ml_features_USDJPY_admiral_v3_5.json"),
+    "SP500":  Path(f"{_MBASE}/ml_features_SP500_admiral_v3_5.json"),
+    "DJ30":   Path(f"{_MBASE}/ml_features_DJ30_admiral_v3_5.json"),
+    "UK100":  Path(f"{_MBASE}/ml_features_UK100_admiral_v3_5.json"),
+    "FRA40":  Path(f"{_MBASE}/ml_features_FRA40_admiral_v3_5.json"),
+    "USDCAD": Path(f"{_MBASE}/ml_features_USDCAD_admiral_v3_5.json"),
+    "USDCHF": Path(f"{_MBASE}/ml_features_USDCHF_admiral_v3_5.json"),
 }
 
 # Models specifiques par (INSTRUMENT, TF) — user 2026-05-16
@@ -75,26 +73,25 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
     ("NAS100", "M5"): Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_NAS100_M5.json"),
 }
 
-# Seuil par actif (user 2026-05-16)
+# V3.5 thresholds (user 2026-05-20) - calibre sur OOS 12 mois Admiral 8 ans
+# Strategie : seuil 0.70 minimum partout (WR >= 73% partout), montee 0.75 si
+# WR <75% au seuil 0.70.
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.55,  # user 2026-05-17 : aligne tous les actifs (sauf forex) a 0.55
-    "NAS100": 0.55,
-    "GER40":  0.55,
-    "BTCUSD": 0.55,
-    # Forex : seuil plus haut (user 2026-05-17). WR @0.55 ~48% (breakeven),
-    # @0.65 monte a 52% (rentable avec RR=2).
-    "EURUSD": 0.65,
-    "GBPUSD": 0.55,  # TEST WR 69.9% @0.55, AUC 0.768
-    "AUDUSD": 0.55,  # TEST WR 62.7% @0.55, AUC 0.726
-    "USDJPY": 0.55,  # TEST WR 59.8% @0.55, AUC 0.765
-    # Phase 4 (user 2026-05-18) - seuils bases sur Test OOS 8.5 mois
-    "SP500":  0.60,  # TEST WR 66.0% @0.60, AUC 0.719
-    "DJ30":   0.60,  # TEST WR 66.0% @0.60, AUC 0.736
-    "UK100":  0.60,  # TEST WR 71.7% @0.60, AUC 0.783 (best)
-    "FRA40":  0.60,  # TEST WR 67.8% @0.60, AUC 0.760
-    "JP225":  0.60,  # TEST WR 70.0% @0.60, AUC 0.788
-    "USDCAD": 0.55,  # TEST WR 63.6% @0.55, AUC 0.805 (best AUC)
-    "USDCHF": 0.55,  # TEST WR 67.6% @0.55, AUC 0.771
+    "XAUUSD": 0.70,  # TEST WR 73.0% @0.70, AUC 0.778
+    "NAS100": 0.70,  # TEST WR 76.3% @0.70, AUC 0.813
+    "GER40":  0.70,  # AUC 0.804
+    "BTCUSD": 0.70,  # TEST WR 73.8% @0.70, AUC 0.810
+    "EURUSD": 0.70,  # TEST WR 79.4% @0.70, AUC 0.808
+    "GBPUSD": 0.70,  # TEST WR 74.4% @0.70, AUC 0.804
+    "AUDUSD": 0.70,  # TEST WR 79.8% @0.70, AUC 0.811
+    "USDJPY": 0.70,  # TEST WR 75.0% @0.70, AUC 0.804
+    "SP500":  0.70,  # TEST WR 80.5% @0.70, AUC 0.801
+    "DJ30":   0.70,  # TEST WR 73.4% @0.70, AUC 0.792
+    "UK100":  0.70,  # TEST WR 72.8% @0.70, AUC 0.787
+    "FRA40":  0.70,  # TEST WR 75.1% @0.70, AUC 0.799
+    "USDCAD": 0.70,  # TEST WR 80.0% @0.70, AUC 0.786
+    "USDCHF": 0.70,  # TEST WR 77.7% @0.70, AUC 0.806
+    # JP225 desactive (ecart Duka/Vantage trop grand)
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {

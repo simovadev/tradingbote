@@ -83,16 +83,16 @@ SCAN_INTERVAL_SEC = 15
 # Cooldown par actif
 COOLDOWN_SEC = 15 * 60
 
-# Max trades concurrents (toutes assets)
-MAX_CONCURRENT = 3
+# V4 (user 2026-05-20) : MAX_CONCURRENT 8 (au lieu de 3) - le bot V3.5 a 14 actifs
+# avec WR 73-80%, on peut avoir plus de slots en parallele (decorrelation).
+MAX_CONCURRENT = 8
 
-# MM progressif (user 2026-05-18 : sprint 30% jusqu'a 5000€ puis 5% safe)
-# Objectif : atteindre 5000€ en ~2 semaines (vs 3 avec 20%)
-# Risque DD max attendu : -87% sur 5 LOSS consecutifs (90% chance sur 8.5 mois)
-# Aucune liquidation sur 200 simulations 480 trades.
-THRESHOLD_SAFE_MODE = 5000.0  # balance >= 5000 -> mode 5%
-RISK_PCT_AGGRESSIVE = 0.30    # 30% par trade jusqu'a 5000€ (sprint)
-RISK_PCT_SAFE = 0.05
+# MM V4 (user 2026-05-20) : risque reduit pour multi-trades V3.5
+# Avec MAX_CONCURRENT=8 * 5% = 40% exposition max = safe
+# Au-dessus 5000€ : 3% pour limiter DD a 24% max
+THRESHOLD_SAFE_MODE = 5000.0
+RISK_PCT_AGGRESSIVE = 0.05    # 5% par trade jusqu'a 5000€ (vs 30% V2)
+RISK_PCT_SAFE = 0.03           # 3% au-dessus de 5000€
 RISK_PCT_TEST = 0.02
 
 # Magic number (identifie nos trades dans MT5)
