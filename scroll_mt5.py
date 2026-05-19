@@ -18,10 +18,10 @@ import sys
 # Nombre de scrolls (chaque scroll = ~30-50 bougies en arriere selon le zoom)
 # User 2026-05-19 : objectif jusqu'a 10 ans (2016 -> 2026)
 N_SCROLLS = 8000
-# Delai entre scrolls : 0.003s = 3000 scrolls/s max, mais MT5 peut suivre 0.005s
-DELAY = 0.003
-# Direction scroll : NEGATIF = scroll vers le PASSE dans MT5
-SCROLL_DIR = -20
+# Delai entre scrolls : 0 = aussi vite que possible
+DELAY = 0
+# Direction et amplitude scroll : NEGATIF + plus grand = scroll plus loin par tick
+SCROLL_DIR = -100
 
 if len(sys.argv) > 1:
     try:
