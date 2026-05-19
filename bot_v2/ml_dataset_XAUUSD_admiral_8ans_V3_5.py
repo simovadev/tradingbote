@@ -16,8 +16,12 @@ Output : data/ml_dataset_XAUUSD_admiral_8ans_V3_5.parquet
 """
 from __future__ import annotations
 
+import os
 import sys
-sys.path.insert(0, 'c:/Users/Shadow/TradingBot')
+
+# Auto-detect Windows vs Linux pour le chemin racine
+ROOT = "c:/Users/Shadow/TradingBot" if sys.platform == "win32" else "/workspace/TradingBot"
+sys.path.insert(0, ROOT)
 
 from pathlib import Path
 
@@ -33,19 +37,25 @@ def main():
     earliest_end = df.index[-1]
     earliest_start = df.index[0]
 
+    # Chunks 1 mois si CPU >= 64 cores (ULTRA mode : 93 chunks parallel)
+    # Sinon chunks 3 mois (31 chunks)
+    cpu_count = os.cpu_count() or 4
+    chunk_months = 1 if cpu_count >= 64 else 3
+
     print(f"=== ML DATASET XAUUSD V3.5 (filtres relaches) ===")
     print(f"Plage data : {earliest_start.date()} -> {earliest_end.date()}")
     print(f"Bougies M1 : {len(df):,}")
     print(f"Annees     : {(earliest_end - earliest_start).days / 365.25:.2f}")
+    print(f"Cores      : {cpu_count} -> chunks de {chunk_months} mois")
     print()
 
-    output_path = Path("c:/Users/Shadow/TradingBot/data/ml_dataset_XAUUSD_admiral_8ans_V3_5.parquet")
+    output_path = Path(f"{ROOT}/data/ml_dataset_XAUUSD_admiral_8ans_V3_5.parquet")
     build_dataset(
         earliest_start,
         earliest_end,
         instruments,
         output_path=output_path,
-        chunk_months=3,
+        chunk_months=chunk_months,
         ltf="M1",
     )
 
