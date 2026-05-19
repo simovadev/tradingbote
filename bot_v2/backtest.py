@@ -99,7 +99,11 @@ def simulate_trade(
     # Option A (user 2026-05-17) : on commence a fill_idx + 1 pour ne pas examiner
     # la bougie de fill (sa mèche couvre souvent SL+TP sur WTI/NAS volatiles,
     # ce qui causait des LOSS instantanes irrealistes).
-    for j in range(fill_idx + 1, len(df)):
+    # FIX 2026-05-19 : cap a max_scan_bars (500 bougies = 8h M1) pour eviter
+    # de scanner 2.6M bougies sur chaque setup (perf x100).
+    max_scan_bars = 500
+    scan_end = min(fill_idx + 1 + max_scan_bars, len(df))
+    for j in range(fill_idx + 1, scan_end):
         h = highs[j]
         l = lows[j]
         if setup.direction == "bullish":
