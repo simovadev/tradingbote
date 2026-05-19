@@ -17,11 +17,11 @@ import sys
 
 # Nombre de scrolls (chaque scroll = ~30-50 bougies en arriere selon le zoom)
 # User 2026-05-19 : objectif jusqu'a 10 ans (2016 -> 2026)
-# 10 ans M1 = ~5M bougies | si chaque scroll charge ~1000 bougies -> 5000-8000 scrolls
-# On vise 8000 pour etre sur d'atteindre la limite Vantage
 N_SCROLLS = 8000
-# Delai entre scrolls (sinon MT5 peut bug)
-DELAY = 0.015
+# Delai entre scrolls : 0.003s = 3000 scrolls/s max, mais MT5 peut suivre 0.005s
+DELAY = 0.003
+# Direction scroll : NEGATIF = scroll vers le PASSE dans MT5
+SCROLL_DIR = -20
 
 if len(sys.argv) > 1:
     try:
@@ -55,8 +55,8 @@ print()
 start = time.time()
 try:
     for i in range(N_SCROLLS):
-        pyautogui.scroll(20)  # scroll up = vers le passe
-        if (i + 1) % 200 == 0:
+        pyautogui.scroll(SCROLL_DIR)  # negatif = vers le passe
+        if (i + 1) % 500 == 0:
             elapsed = time.time() - start
             print(f"  Scroll {i+1}/{N_SCROLLS}  ({elapsed:.0f}s)")
         time.sleep(DELAY)
