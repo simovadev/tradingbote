@@ -506,14 +506,19 @@ def run_live(test_dry_run: bool = False):
         return
 
     log.info(f"Connecte au compte {mt5_exec.account_info.login} sur {mt5_exec.account_info.server}")
-    log.info(f"Balance actuelle : {mt5_exec.get_balance():.2f} {mt5_exec.account_info.currency}")
+    cash_real = mt5_exec.get_balance()
+    log.info(f"Cash reel : {cash_real:.2f} {mt5_exec.account_info.currency} + bonus 50€ = base calcul {cash_real + 50:.2f}€")
     if test_dry_run:
         log.info("** MODE DRY RUN - aucun ordre ne sera place **")
 
     try:
         while True:
             try:
-                balance = mt5_exec.get_balance()
+                # User 2026-05-19 : bonus Vantage de 50€ ajoute au calcul du risk
+                # ATTENTION : le bonus n'est pas du cash retirable, c'est juste pour gonfler
+                # le capital de calcul. Si LOSS, c'est le cash reel qui est entame.
+                BONUS_EUR = 50.0
+                balance = mt5_exec.get_balance() + BONUS_EUR
                 active_assets = get_active_assets(balance)
                 n_open = mt5_exec.get_n_open_positions()
                 # V2 : on compte aussi les pending orders (ils peuvent devenir des positions)
