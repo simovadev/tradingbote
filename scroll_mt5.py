@@ -16,9 +16,10 @@ import time
 import sys
 
 # Nombre de scrolls (chaque scroll = ~30-50 bougies en arriere selon le zoom)
-# User 2026-05-19 : objectif 6 ans (2020 -> 2026) au lieu de 4
-# 6 ans M1 = ~3.1M bougies | si chaque scroll charge ~1000 bougies -> 3100 scrolls min
-N_SCROLLS = 5000
+# User 2026-05-19 : objectif jusqu'a 10 ans (2016 -> 2026)
+# 10 ans M1 = ~5M bougies | si chaque scroll charge ~1000 bougies -> 5000-8000 scrolls
+# On vise 8000 pour etre sur d'atteindre la limite Vantage
+N_SCROLLS = 8000
 # Delai entre scrolls (sinon MT5 peut bug)
 DELAY = 0.015
 
@@ -39,7 +40,7 @@ print("3. Zoom out a fond (touche '-' x 20 fois)")
 print("4. Apres ce message, tu as 5s pour cliquer sur le chart")
 print()
 print(f"Nombre de scrolls : {N_SCROLLS} (~{N_SCROLLS * DELAY:.0f}s)")
-print(f"Objectif : 6 ans d'historique (2020 -> 2026)")
+print(f"Objectif : jusqu'a 10 ans d'historique (2016 -> 2026 ideal)")
 print()
 input("Appuie sur Entree pour demarrer le compte a rebours...")
 
