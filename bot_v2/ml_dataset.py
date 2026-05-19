@@ -541,9 +541,11 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     if not tasks_to_do:
         print("Tout est deja fait.", flush=True)
     else:
-        # Auto-detect cores : exploite tout le CPU dispo.
-        # - Shadow Power local : 4 cores physiques -> n_workers=6 max (SMT marginal)
-        # - Vast.ai EPYC 9554 128 cores + 257 GB RAM -> n_workers=128 (full power)
+        # Strategy : fewer workers + more chunks/worker = mieux exploite WORKER_CACHE.
+        # Chaque worker charge HTF/SMT 1 fois puis reutilise pour TOUS ses chunks.
+        # Optimal : 4-6 chunks par worker.
+        # - PC local 8 vCores : 6 workers (max RAM)
+        # - Vast.ai 128 cores : 16-24 workers selon nb chunks
         # Override via env var N_WORKERS si besoin.
         import os
         env_workers = os.environ.get("N_WORKERS")
@@ -552,12 +554,15 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
         else:
             cpu_count = os.cpu_count() or 4
             if cpu_count <= 8:
-                # PC local : 6 workers max (RAM 16 GB limite)
+                # PC local : 6 workers max
                 n_workers = min(6, len(tasks_to_do))
             else:
-                # Serveur : utilise tous les cores (RAM dispo verifiee)
-                n_workers = min(cpu_count, len(tasks_to_do))
-        print(f"CPU cores detected : {os.cpu_count()}, workers utilises : {n_workers}", flush=True)
+                # Serveur : vise 4-6 chunks par worker (max 32 workers)
+                target_chunks_per_worker = 5
+                ideal_workers = max(1, len(tasks_to_do) // target_chunks_per_worker)
+                n_workers = min(32, cpu_count, ideal_workers, len(tasks_to_do))
+                n_workers = max(n_workers, 4)  # min 4 workers
+        print(f"CPU cores detected : {os.cpu_count()}, workers utilises : {n_workers} (chunks/worker ~{len(tasks_to_do)//max(n_workers,1)})", flush=True)
 
         done_count = 0
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
