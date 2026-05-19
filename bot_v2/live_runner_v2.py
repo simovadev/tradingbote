@@ -63,11 +63,14 @@ log = logging.getLogger("live")
 # Actifs traders en live (alignement avec backtest valide)
 # Phase 4 (user 2026-05-18) : +7 nouveaux actifs (SP500, DJ30, UK100, FRA40, JP225, USDCAD, USDCHF)
 # NZDUSD ecarte (WR Test 53.5% trop faible)
+# JP225 desactive (user 2026-05-19) : ecart Dukascopy/Vantage -410 pts (0.67%) sur session
+# off-hours Asia. Setup OB Duka non reproductible sur Vantage. A re-evaluer si on
+# trouve data plus proche de Vantage.
 LIVE_ASSETS = [
     # Phase 1-3 (8 actifs valides)
     "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY",
-    # Phase 4 (5 indices + 2 forex)
-    "SP500", "DJ30", "UK100", "FRA40", "JP225", "USDCAD", "USDCHF",
+    # Phase 4 (4 indices + 2 forex, JP225 ecarte)
+    "SP500", "DJ30", "UK100", "FRA40", "USDCAD", "USDCHF",
 ]
 
 # Reduire la liste en mode test (5€ : pas assez pour BTC/NAS/GER lot min)
