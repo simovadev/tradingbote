@@ -265,39 +265,57 @@ def _process_instrument(args):
     htf2_name = chain["htf2"]
 
     try:
-        # === Recupere data + indicateurs globaux depuis cache worker ===
-        global_data = _get_global_data(inst, ltf_name, htf_name, htf2_name)
-        df_ltf = global_data["df_ltf"]
-        df_htf = global_data["df_htf"]
-        df_htf2 = global_data["df_htf2"]
-        df_d1 = global_data["df_d1"]
-        htf_swings = global_data["htf_swings"]
+        df_ltf = load(inst, ltf_name)
+        df_htf = load(inst, htf_name)
+        try:
+            df_htf2 = load(inst, htf2_name)
+        except Exception:
+            df_htf2 = None
+        try:
+            df_d1 = load(inst, "D1")
+            if len(df_d1) < 10:
+                raise FileNotFoundError
+        except Exception:
+            df_h1 = load(inst, "H1")
+            df_d1 = build_d1_from_h1(df_h1)
+
+        htf_dfs_swings = {}
+        for tf in ["H1", "H4", "D1"]:
+            try:
+                htf_dfs_swings[tf] = load(inst, tf)
+            except Exception:
+                pass
+        htf_swings = collect_htf_swings(htf_dfs_swings, swing_strength=3)
 
         mask = (df_ltf.index >= start_ts) & (df_ltf.index <= end_ts)
         df_ltf_w = df_ltf[mask]
         if len(df_ltf_w) < 100:
             return [], inst, "Pas assez de donnees"
 
-        # REFACTO : utilise les correlated_dfs deja en cache global, slice juste sur la periode
         correlated_dfs = {}
-        for corr_name, (df_c_full, corr_type) in global_data["correlated_dfs_full"].items():
-            mask_c = (df_c_full.index >= start_ts) & (df_c_full.index <= end_ts)
-            correlated_dfs[corr_name] = (df_c_full[mask_c], corr_type)
+        for corr_name, corr_type in SMT_PAIRS.get(inst, []):
+            try:
+                df_c = load(corr_name, ltf_name)
+                if len(df_c) > 0:
+                    mask_c = (df_c.index >= start_ts) & (df_c.index <= end_ts)
+                    correlated_dfs[corr_name] = (df_c[mask_c], corr_type)
+            except Exception:
+                continue
 
         swing_strength_ltf = get_param(inst, "swing_strength_m1", 2)
         obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf, max_group_size=2)
 
-        # Cache pour acceleration (LTF recalcule a chaque chunk, HTF vient du cache global)
+        # Cache pour acceleration
         cache = {
             "swings_ltf": find_swings(df_ltf_w, strength=swing_strength_ltf),
             "fvgs_ltf": detect_fvg(df_ltf_w),
             "breakers_ltf": detect_breakers(df_ltf_w),
-            "obs_htf": global_data["obs_htf"],  # PRECOMPUTED !
+            "obs_htf": detect_order_blocks(df_htf),
         }
         cache["structure_breaks"] = detect_structure_breaks(df_ltf_w, swings=cache["swings_ltf"])
         cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
-        if global_data["obs_htf2"] is not None:
-            cache["obs_htf2"] = global_data["obs_htf2"]  # PRECOMPUTED !
+        if df_htf2 is not None:
+            cache["obs_htf2"] = detect_order_blocks(df_htf2)
 
         df_h1_for_feu_vert = df_htf2 if df_htf2 is not None else None
 
@@ -541,11 +559,7 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     if not tasks_to_do:
         print("Tout est deja fait.", flush=True)
     else:
-        # Strategy : fewer workers + more chunks/worker = mieux exploite WORKER_CACHE.
-        # Chaque worker charge HTF/SMT 1 fois puis reutilise pour TOUS ses chunks.
-        # Optimal : 4-6 chunks par worker.
-        # - PC local 8 vCores : 6 workers (max RAM)
-        # - Vast.ai 128 cores : 16-24 workers selon nb chunks
+        # Workers auto-detect : utilise tous les cores dispo (cap a 32 pour eviter deadlock pandas multiprocessing).
         # Override via env var N_WORKERS si besoin.
         import os
         env_workers = os.environ.get("N_WORKERS")
@@ -554,15 +568,11 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
         else:
             cpu_count = os.cpu_count() or 4
             if cpu_count <= 8:
-                # PC local : 6 workers max
                 n_workers = min(6, len(tasks_to_do))
             else:
-                # Serveur : vise 4-6 chunks par worker (max 32 workers)
-                target_chunks_per_worker = 5
-                ideal_workers = max(1, len(tasks_to_do) // target_chunks_per_worker)
-                n_workers = min(32, cpu_count, ideal_workers, len(tasks_to_do))
-                n_workers = max(n_workers, 4)  # min 4 workers
-        print(f"CPU cores detected : {os.cpu_count()}, workers utilises : {n_workers} (chunks/worker ~{len(tasks_to_do)//max(n_workers,1)})", flush=True)
+                # Serveur : 32 max (deadlock pandas+multiprocessing au-dela)
+                n_workers = min(32, cpu_count, len(tasks_to_do))
+        print(f"CPU cores detected : {os.cpu_count()}, workers utilises : {n_workers}", flush=True)
 
         done_count = 0
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
