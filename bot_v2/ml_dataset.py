@@ -177,11 +177,81 @@ TF_CHAINS = {
 }
 
 
+# ============ CACHE WORKER-LEVEL (refacto 2026-05-19) ============
+# Chaque worker process garde en cache les data globales (M1/HTF/SMT/swings/OBs HTF)
+# pour eviter de les recharger/recalculer a chaque chunk.
+# Gain estime : x3-x5 sur la vitesse de build (selon nb chunks).
+_WORKER_CACHE = {}
+
+
+def _get_global_data(inst, ltf_name, htf_name, htf2_name):
+    """Charge et cache les data globales (toutes periodes) + indicateurs HTF.
+
+    Appele 1 fois par worker process, reutilise pour tous les chunks du worker.
+    """
+    cache_key = (inst, ltf_name, htf_name, htf2_name)
+    if cache_key in _WORKER_CACHE:
+        return _WORKER_CACHE[cache_key]
+
+    # === Load data globales ===
+    df_ltf = load(inst, ltf_name)
+    df_htf = load(inst, htf_name)
+    try:
+        df_htf2 = load(inst, htf2_name)
+    except Exception:
+        df_htf2 = None
+    try:
+        df_d1 = load(inst, "D1")
+        if len(df_d1) < 10:
+            raise FileNotFoundError
+    except Exception:
+        df_h1 = load(inst, "H1")
+        df_d1 = build_d1_from_h1(df_h1)
+
+    # === Precompute HTF indicateurs (1 fois pour toutes !) ===
+    htf_dfs_swings = {}
+    for tf in ["H1", "H4", "D1"]:
+        try:
+            htf_dfs_swings[tf] = load(inst, tf)
+        except Exception:
+            pass
+    htf_swings = collect_htf_swings(htf_dfs_swings, swing_strength=3)
+
+    # === Precompute OBs HTF (1 fois pour toutes !) ===
+    obs_htf = detect_order_blocks(df_htf)
+    obs_htf2 = detect_order_blocks(df_htf2) if df_htf2 is not None else None
+
+    # === Load SMT correlated data (XAGUSD, DXY pour XAUUSD) ===
+    correlated_dfs_full = {}
+    for corr_name, corr_type in SMT_PAIRS.get(inst, []):
+        try:
+            df_c = load(corr_name, ltf_name)
+            if len(df_c) > 0:
+                correlated_dfs_full[corr_name] = (df_c, corr_type)
+        except Exception:
+            continue
+
+    data = {
+        "df_ltf": df_ltf,
+        "df_htf": df_htf,
+        "df_htf2": df_htf2,
+        "df_d1": df_d1,
+        "htf_swings": htf_swings,
+        "obs_htf": obs_htf,
+        "obs_htf2": obs_htf2,
+        "correlated_dfs_full": correlated_dfs_full,
+    }
+    _WORKER_CACHE[cache_key] = data
+    return data
+
+
 def _process_instrument(args):
     """Worker process : extrait dataset complet pour un instrument.
 
     Args tuple : (inst, start_ts, end_ts) ou (inst, start_ts, end_ts, ltf).
     LTF par defaut = M1. Si M5/M15/M30 fournis, on adapte les chaines HTF.
+
+    REFACTO 2026-05-19 : utilise _WORKER_CACHE pour charger data 1 fois par worker.
     """
     if len(args) == 4:
         inst, start_ts, end_ts, ltf = args
@@ -195,57 +265,39 @@ def _process_instrument(args):
     htf2_name = chain["htf2"]
 
     try:
-        df_ltf = load(inst, ltf_name)
-        df_htf = load(inst, htf_name)
-        try:
-            df_htf2 = load(inst, htf2_name)
-        except Exception:
-            df_htf2 = None
-        try:
-            df_d1 = load(inst, "D1")
-            if len(df_d1) < 10:
-                raise FileNotFoundError
-        except Exception:
-            df_h1 = load(inst, "H1")
-            df_d1 = build_d1_from_h1(df_h1)
-
-        htf_dfs_swings = {}
-        for tf in ["H1", "H4", "D1"]:
-            try:
-                htf_dfs_swings[tf] = load(inst, tf)
-            except Exception:
-                pass
-        htf_swings = collect_htf_swings(htf_dfs_swings, swing_strength=3)
+        # === Recupere data + indicateurs globaux depuis cache worker ===
+        global_data = _get_global_data(inst, ltf_name, htf_name, htf2_name)
+        df_ltf = global_data["df_ltf"]
+        df_htf = global_data["df_htf"]
+        df_htf2 = global_data["df_htf2"]
+        df_d1 = global_data["df_d1"]
+        htf_swings = global_data["htf_swings"]
 
         mask = (df_ltf.index >= start_ts) & (df_ltf.index <= end_ts)
         df_ltf_w = df_ltf[mask]
         if len(df_ltf_w) < 100:
             return [], inst, "Pas assez de donnees"
 
+        # REFACTO : utilise les correlated_dfs deja en cache global, slice juste sur la periode
         correlated_dfs = {}
-        for corr_name, corr_type in SMT_PAIRS.get(inst, []):
-            try:
-                df_c = load(corr_name, ltf_name)
-                if len(df_c) > 0:
-                    mask_c = (df_c.index >= start_ts) & (df_c.index <= end_ts)
-                    correlated_dfs[corr_name] = (df_c[mask_c], corr_type)
-            except Exception:
-                continue
+        for corr_name, (df_c_full, corr_type) in global_data["correlated_dfs_full"].items():
+            mask_c = (df_c_full.index >= start_ts) & (df_c_full.index <= end_ts)
+            correlated_dfs[corr_name] = (df_c_full[mask_c], corr_type)
 
         swing_strength_ltf = get_param(inst, "swing_strength_m1", 2)
         obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf, max_group_size=2)
 
-        # Cache pour acceleration
+        # Cache pour acceleration (LTF recalcule a chaque chunk, HTF vient du cache global)
         cache = {
             "swings_ltf": find_swings(df_ltf_w, strength=swing_strength_ltf),
             "fvgs_ltf": detect_fvg(df_ltf_w),
             "breakers_ltf": detect_breakers(df_ltf_w),
-            "obs_htf": detect_order_blocks(df_htf),
+            "obs_htf": global_data["obs_htf"],  # PRECOMPUTED !
         }
         cache["structure_breaks"] = detect_structure_breaks(df_ltf_w, swings=cache["swings_ltf"])
         cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
-        if df_htf2 is not None:
-            cache["obs_htf2"] = detect_order_blocks(df_htf2)
+        if global_data["obs_htf2"] is not None:
+            cache["obs_htf2"] = global_data["obs_htf2"]  # PRECOMPUTED !
 
         df_h1_for_feu_vert = df_htf2 if df_htf2 is not None else None
 
