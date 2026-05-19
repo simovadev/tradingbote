@@ -279,6 +279,26 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
             log.error(f"SL distance = 0 sur {instrument}")
             return False
 
+        # === SECURITE 3 (user 2026-05-19) : Verifie derive prix vs setup origine ===
+        # Si le prix actuel a derive de >30% du SL distance par rapport a l'entry de l'OB,
+        # le RR sera casse. On rejette le trade.
+        try:
+            import MetaTrader5 as _mt5
+            from bot_v2.mt5_executor import to_broker_symbol
+            tick_now = _mt5.symbol_info_tick(to_broker_symbol(instrument))
+            if tick_now is not None:
+                current_price = (tick_now.bid + tick_now.ask) / 2
+                price_drift = abs(current_price - setup.entry_price)
+                if price_drift > sl_distance * 0.30:
+                    log.warning(
+                        f"REJET {instrument} : prix derive {price_drift:.5f} > 30% SL ({sl_distance*0.30:.5f}). "
+                        f"OB obsolete (entry_origine={setup.entry_price}, now={current_price:.5f}). SKIP."
+                    )
+                    state.log_event("WARN", f"Prix derive trop {instrument}: skip")
+                    return False
+        except Exception as e:
+            log.debug(f"Check derive prix fail {instrument}: {e}")
+
         # Risk en EUR (compte EUR)
         risk_eur = balance * risk_pct
 
