@@ -52,11 +52,18 @@ NON_FEATURES = {
 
 
 def load_all_chunks():
-    """Charge tous les chunks V3.5 disponibles."""
-    chunks = sorted(PARTIAL_DIR.glob("XAUUSD_M1_*.parquet"))
-    print(f"Chargement {len(chunks)} chunks V3.5...")
-    all_dfs = [pd.read_parquet(c) for c in chunks]
-    df = pd.concat(all_dfs, ignore_index=True)
+    """Charge le dataset final V3.5 (priorite) sinon agrege les chunks partials."""
+    import sys as _sys
+    _root = "c:/Users/Shadow/TradingBot" if _sys.platform == "win32" else "/workspace/TradingBot"
+    final_path = Path(f"{_root}/data/ml_dataset_XAUUSD_admiral_8ans_V3_5.parquet")
+    if final_path.exists():
+        print(f"Chargement dataset final : {final_path.name}")
+        df = pd.read_parquet(final_path)
+    else:
+        chunks = sorted(PARTIAL_DIR.glob("XAUUSD_M1_*.parquet"))
+        print(f"Chargement {len(chunks)} chunks V3.5...")
+        all_dfs = [pd.read_parquet(c) for c in chunks]
+        df = pd.concat(all_dfs, ignore_index=True)
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     df = df.sort_values("ts").reset_index(drop=True)
     return df
