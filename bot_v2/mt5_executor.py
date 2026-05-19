@@ -310,6 +310,138 @@ class MT5Executor:
             "volume": float(result.volume),
         }
 
+    def place_limit_order(
+        self,
+        symbol: str,
+        direction: Literal["bullish", "bearish"],
+        volume: float,
+        entry_price: float,
+        sl: float,
+        tp: float,
+        expiration_minutes: int = 60,
+        comment: str = "Vizion_LIMIT",
+        magic: int = 20260517,
+    ) -> dict | None:
+        """Place un ordre LIMIT (pending) au prix entry_price avec SL/TP.
+
+        BUY LIMIT  : ordre place SOUS le prix actuel (achat moins cher si pullback)
+        SELL LIMIT : ordre place AU-DESSUS du prix actuel (vente plus haut si rebond)
+
+        L'ordre attend que le prix touche entry_price puis s'execute automatiquement.
+        Expire apres expiration_minutes si non-touche.
+
+        Equivalent du `setup.entry_price` du backtest (fill au prix de l'OB).
+        """
+        if not self.ensure_symbol_active(symbol):
+            return None
+
+        broker_sym = to_broker_symbol(symbol)
+        info = self.symbol_info(symbol)
+        if info is None:
+            log.error(f"symbol_info({symbol}) = None")
+            return None
+
+        vol_min = info.volume_min
+        vol_step = info.volume_step
+        volume = max(vol_min, round(volume / vol_step) * vol_step)
+        volume = round(volume, 2)
+
+        tick = mt5.symbol_info_tick(broker_sym)
+        if tick is None:
+            log.error(f"Pas de tick pour {broker_sym}")
+            return None
+
+        # Detection automatique du sens du LIMIT selon direction et prix actuel
+        if direction == "bullish":
+            # BUY : on veut acheter. Si entry < prix actuel -> BUY LIMIT (pullback)
+            #                       Si entry > prix actuel -> BUY STOP (breakout)
+            if entry_price < tick.ask:
+                order_type = mt5.ORDER_TYPE_BUY_LIMIT
+            else:
+                order_type = mt5.ORDER_TYPE_BUY_STOP
+        else:
+            # SELL : on veut vendre. Si entry > prix actuel -> SELL LIMIT (rebond)
+            #                        Si entry < prix actuel -> SELL STOP (breakdown)
+            if entry_price > tick.bid:
+                order_type = mt5.ORDER_TYPE_SELL_LIMIT
+            else:
+                order_type = mt5.ORDER_TYPE_SELL_STOP
+
+        from datetime import datetime, timedelta, timezone
+        expiration = datetime.now(timezone.utc) + timedelta(minutes=expiration_minutes)
+
+        request = {
+            "action": mt5.TRADE_ACTION_PENDING,
+            "symbol": broker_sym,
+            "volume": volume,
+            "type": order_type,
+            "price": float(entry_price),
+            "sl": float(sl),
+            "tp": float(tp),
+            "deviation": 20,
+            "magic": magic,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_SPECIFIED,
+            "expiration": int(expiration.timestamp()),
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+
+        result = mt5.order_send(request)
+        if result is None:
+            log.error(f"order_send None : {mt5.last_error()}")
+            return None
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            log.error(
+                f"LIMIT REJECTED {symbol} {direction} vol={volume} entry={entry_price} "
+                f"retcode={result.retcode} : {result.comment}"
+            )
+            return None
+
+        log.info(
+            f"LIMIT OK {symbol} {direction} vol={volume} entry={entry_price:.5f} "
+            f"SL={sl:.5f} TP={tp:.5f} expire={expiration_minutes}min ticket={result.order}"
+        )
+        return {
+            "ticket": result.order,
+            "price": float(entry_price),
+            "volume": float(volume),
+        }
+
+    def get_pending_orders(self, magic: int | None = None) -> list[dict]:
+        """Liste des ordres pending (LIMIT non encore remplis)."""
+        orders = mt5.orders_get()
+        if orders is None:
+            return []
+        out = []
+        for o in orders:
+            if magic and o.magic != magic:
+                continue
+            out.append({
+                "ticket": o.ticket,
+                "symbol": from_broker_symbol(o.symbol),
+                "type": o.type,
+                "volume": o.volume_initial,
+                "price_open": o.price_open,
+                "sl": o.sl,
+                "tp": o.tp,
+                "time_setup": pd.Timestamp(o.time_setup, unit="s", tz="UTC"),
+            })
+        return out
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        """Annule un ordre pending."""
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": ticket,
+        }
+        result = mt5.order_send(request)
+        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            log.error(f"Cancel pending {ticket} fail : {result.comment if result else 'None'}")
+            return False
+        log.info(f"Pending order {ticket} annule")
+        return True
+
     def close_position(self, ticket: int) -> bool:
         """Ferme une position au market. Rarement utilise (le broker gere via SL/TP)."""
         positions = mt5.positions_get(ticket=ticket)
