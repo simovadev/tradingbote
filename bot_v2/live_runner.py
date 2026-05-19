@@ -273,31 +273,54 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
             log.error(f"Symbol info None pour {instrument}")
             return False
 
-        # Distance SL en unites de prix
-        sl_distance = abs(setup.entry_price - setup.stop_loss)
-        if sl_distance == 0:
+        # Distance SL en unites de prix (depuis l'OB d'origine)
+        sl_distance_orig = abs(setup.entry_price - setup.stop_loss)
+        tp_distance_orig = abs(setup.entry_price - setup.take_profit)
+        if sl_distance_orig == 0:
             log.error(f"SL distance = 0 sur {instrument}")
             return False
 
-        # === SECURITE 3 (user 2026-05-19) : Verifie derive prix vs setup origine ===
-        # Si le prix actuel a derive de >30% du SL distance par rapport a l'entry de l'OB,
-        # le RR sera casse. On rejette le trade.
+        # === FIX (user 2026-05-19) : Recalcule SL/TP au prix REEL d'execution ===
+        # Avant : on envoyait setup.stop_loss/take_profit (figes au moment de la
+        # detection initiale de l'OB). Si le prix a derive entre detection et execution
+        # (cas reel ce matin : trade #2 JP225 entry 60509 mais SL/TP figes a 60667/60478
+        # donc RR effectif 0.19 au lieu de 2.0).
+        #
+        # Maintenant : on prend le prix marche AU MOMENT de l'ordre, et on calcule
+        # SL et TP par rapport a CE prix avec les memes distances que l'OB.
+        # Resultat : RR preserve quoi qu'il arrive.
+        sl_price = float(setup.stop_loss)   # default = setup.stop_loss
+        tp_price = float(setup.take_profit) # default = setup.take_profit
+        sl_distance = sl_distance_orig
         try:
             import MetaTrader5 as _mt5
             from bot_v2.mt5_executor import to_broker_symbol
             tick_now = _mt5.symbol_info_tick(to_broker_symbol(instrument))
             if tick_now is not None:
-                current_price = (tick_now.bid + tick_now.ask) / 2
-                price_drift = abs(current_price - setup.entry_price)
-                if price_drift > sl_distance * 0.30:
-                    log.warning(
-                        f"REJET {instrument} : prix derive {price_drift:.5f} > 30% SL ({sl_distance*0.30:.5f}). "
-                        f"OB obsolete (entry_origine={setup.entry_price}, now={current_price:.5f}). SKIP."
+                # Prix d'execution probable selon direction
+                if setup.direction == "bullish":
+                    exec_price = tick_now.ask
+                else:
+                    exec_price = tick_now.bid
+
+                price_drift = abs(exec_price - setup.entry_price)
+                # Si derive notable (>10% du SL distance), on recalcule SL et TP
+                if price_drift > sl_distance_orig * 0.10:
+                    if setup.direction == "bullish":
+                        sl_price = exec_price - sl_distance_orig
+                        tp_price = exec_price + tp_distance_orig
+                    else:
+                        sl_price = exec_price + sl_distance_orig
+                        tp_price = exec_price - tp_distance_orig
+                    log.info(
+                        f"{instrument} SL/TP recalcules au prix marche {exec_price:.5f} "
+                        f"(derive {price_drift:.5f} vs entry OB {setup.entry_price:.5f}). "
+                        f"Nouveau SL={sl_price:.5f}, TP={tp_price:.5f}"
                     )
-                    state.log_event("WARN", f"Prix derive trop {instrument}: skip")
-                    return False
+                # sl_distance reste identique (on garde le meme risque en points)
+                sl_distance = sl_distance_orig
         except Exception as e:
-            log.debug(f"Check derive prix fail {instrument}: {e}")
+            log.debug(f"Recalc SL/TP fail {instrument}: {e}, on garde setup origine")
 
         # Risk en EUR (compte EUR)
         risk_eur = balance * risk_pct
@@ -372,13 +395,13 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         log.error(f"Calc lots error {instrument}: {e}")
         return False
 
-    # Place l'ordre
+    # Place l'ordre (avec SL/TP recalcules au prix marche, voir + haut)
     result = mt5_exec.place_market_order(
         symbol=instrument,
         direction=setup.direction,
         volume=lots,
-        sl=float(setup.stop_loss),
-        tp=float(setup.take_profit),
+        sl=sl_price,
+        tp=tp_price,
         comment=f"Vizion {ob.direction[0].upper()} ml={setup_dict['proba']:.2f}",
         magic=BOT_MAGIC,
     )
@@ -393,8 +416,8 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         direction=setup.direction,
         opened_ts=pd.Timestamp.now(tz="UTC"),
         entry=result["price"],
-        sl=float(setup.stop_loss),
-        tp=float(setup.take_profit),
+        sl=sl_price,
+        tp=tp_price,
         rr=float(setup.rr),
         volume=result["volume"],
         score=int(r.score),
@@ -408,7 +431,7 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
 
     log.info(
         f"TRADE OPENED {instrument} {setup.direction} vol={lots} "
-        f"@ {result['price']:.5f} SL={setup.stop_loss:.5f} TP={setup.take_profit:.5f} "
+        f"@ {result['price']:.5f} SL={sl_price:.5f} TP={tp_price:.5f} "
         f"RR={setup.rr:.2f} ML={setup_dict['proba']:.3f} risk={risk_pct:.0%} "
         f"balance={balance:.2f}€"
     )
