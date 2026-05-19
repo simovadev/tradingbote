@@ -13,7 +13,9 @@ Le ML apprendra a filtrer la qualite.
 from __future__ import annotations
 
 import sys
-sys.path.insert(0, 'c:/Users/Shadow/TradingBot')
+# Auto-detect Windows vs Linux pour le sys.path
+_ROOT = "c:/Users/Shadow/TradingBot" if sys.platform == "win32" else "/workspace/TradingBot"
+sys.path.insert(0, _ROOT)
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -536,7 +538,10 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     all_rows = []
     total_tasks = len(instruments) * len(chunks)
     # Dossier separe par TF pour eviter melanges
-    partial_dir = Path(f"c:/Users/Shadow/TradingBot/data/ml_partial_{ltf}")
+    # FIX 2026-05-19 : auto-detect Windows vs Linux path
+    import sys as _sys
+    _root = "c:/Users/Shadow/TradingBot" if _sys.platform == "win32" else "/workspace/TradingBot"
+    partial_dir = Path(f"{_root}/data/ml_partial_{ltf}")
     partial_dir.mkdir(parents=True, exist_ok=True)
 
     # Construit la liste des taches a faire (skip celles deja sauvegardees)
@@ -611,9 +616,9 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     if output_path is None:
         # Nom inclut TF si different de M1 (M1 garde compat avec main historique)
         if ltf == "M1":
-            output_path = Path("c:/Users/Shadow/TradingBot/data/ml_dataset.parquet")
+            output_path = Path(f"{_root}/data/ml_dataset.parquet")
         else:
-            output_path = Path(f"c:/Users/Shadow/TradingBot/data/ml_dataset_{ltf}.parquet")
+            output_path = Path(f"{_root}/data/ml_dataset_{ltf}.parquet")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(output_path)
     print(f"\nDataset sauve : {output_path}")
