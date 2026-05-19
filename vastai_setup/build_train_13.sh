@@ -27,8 +27,8 @@ for ASSET in "${ASSETS[@]}"; do
         continue
     fi
 
-    # Build dataset
-    N_WORKERS=32 python3 -u "$BUILD_SCRIPT" 2>&1 | tail -10
+    # Build dataset (64 workers + full output pour voir chunks)
+    N_WORKERS=64 python3 -u "$BUILD_SCRIPT" 2>&1 | grep -E 'Cores|Decoupage|chunks|workers|XAUUSD|EURUSD|GBPUSD|USDJPY|USDCAD|USDCHF|AUDUSD|GER40|UK100|FRA40|SP500|NAS100|DJ30|BTCUSD|JP225|XAGUSD|Dataset' | tail -30
     DUR_BUILD=$(($(date +%s) - T0))
     echo ""
     echo "  Build $ASSET : ${DUR_BUILD}s"
