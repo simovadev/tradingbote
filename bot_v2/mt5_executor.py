@@ -40,8 +40,7 @@ BROKER_SYMBOL_MAP: dict[str, str] = {
     "USDCAD":   "USDCAD+",
     "USDCHF":   "USDCHF+",
     "NZDUSD":   "NZDUSD+",
-    # Crypto (RAW ECN)
-    "BTCUSD":   "BTCUSD+",
+    # Crypto Vantage : BTCUSD reste BTCUSD (pas de +)
     # Indices : noms specifiques Vantage
     "SPX500":   "SP500",       # SMT NAS/GER
     "DXY":      "USDX",        # Dollar Index
