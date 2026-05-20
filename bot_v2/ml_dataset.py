@@ -305,7 +305,9 @@ def _process_instrument(args):
                 continue
 
         swing_strength_ltf = get_param(inst, "swing_strength_m1", 2)
-        obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf, max_group_size=2)
+        import os as _os
+        min_group = int(_os.environ.get("OB_MIN_GROUP", "2"))
+        obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf, max_group_size=2, min_group_size=min_group)
 
         # Cache pour acceleration
         cache = {
@@ -540,8 +542,11 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     # Dossier separe par TF pour eviter melanges
     # FIX 2026-05-19 : auto-detect Windows vs Linux path
     import sys as _sys
+    import os as _os2
     _root = "c:/Users/Shadow/TradingBot" if _sys.platform == "win32" else "/workspace/TradingBot"
-    partial_dir = Path(f"{_root}/data/ml_partial_{ltf}")
+    _min_group = _os2.environ.get("OB_MIN_GROUP", "2")
+    _suffix = "" if _min_group == "2" else f"_g{_min_group}"
+    partial_dir = Path(f"{_root}/data/ml_partial_{ltf}{_suffix}")
     partial_dir.mkdir(parents=True, exist_ok=True)
 
     # Construit la liste des taches a faire (skip celles deja sauvegardees)

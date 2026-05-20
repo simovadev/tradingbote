@@ -45,7 +45,9 @@ def build_one(asset: str):
     print(f"Annees     : {(earliest_end - earliest_start).days / 365.25:.2f}", flush=True)
     print(f"Cores      : {cpu_count} -> chunks de {chunk_months} mois", flush=True)
 
-    output_path = Path(f"{ROOT}/data/ml_dataset_{asset}_admiral_8ans_V4.parquet")
+    min_group = os.environ.get("OB_MIN_GROUP", "2")
+    suffix = "" if min_group == "2" else f"_g{min_group}"
+    output_path = Path(f"{ROOT}/data/ml_dataset_{asset}_admiral_8ans_V4{suffix}.parquet")
     df_result = build_dataset(
         earliest_start,
         earliest_end,
