@@ -39,8 +39,8 @@ from bot_v2 import ml_filter
 
 
 ML_THRESHOLD = 0.75
-BALANCE = 60.0    # IDENTIQUE training V5
-RISK_PCT = 0.10   # IDENTIQUE training V5 (10%)
+BALANCE = 154.96  # vraie balance live Vantage
+RISK_PCT = 0.10   # 10% par trade
 
 # Fenetre live = 3 mois en arriere (comme le bot live aujourd'hui)
 LOOKBACK_DAYS = 90
