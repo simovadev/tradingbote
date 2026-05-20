@@ -43,7 +43,10 @@ def build_one(asset: str):
     earliest_start = df.index[0]
 
     cpu_count = os.cpu_count() or 4
-    chunk_months = 1 if cpu_count >= 64 else 3
+    # V5 (2026-05-20) : chunks de 3 mois pour reduire I/O (chaque chunk recharge 2.6M M1).
+    # Tests : chunks 1 mois -> 91 reload, ~25s/chunk = 38min/actif
+    #         chunks 3 mois -> 31 reload, ~30s/chunk = 15min/actif
+    chunk_months = 3
 
     print(f"\n=== ML DATASET {asset} V5 (cleanup filtres + features volatilite) ===", flush=True)
     print(f"Plage data : {earliest_start.date()} -> {earliest_end.date()}", flush=True)
