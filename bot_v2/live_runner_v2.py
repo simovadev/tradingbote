@@ -893,12 +893,13 @@ def run_live(test_dry_run: bool = False):
     if test_dry_run:
         log.info("** MODE DRY RUN - aucun ordre ne sera place **")
 
-    # FIX 2026-05-20 (user: "lorsque je redemarrer le bot ca placer des order limite") :
-    # On marque le timestamp de demarrage. Au scan, on IGNORE tout OB dont la validation
-    # est anterieure a BOT_START_TS -> evite de re-placer des LIMIT sur des setups
-    # deja passes (ou deja tradés avant restart).
-    BOT_START_TS = pd.Timestamp.now(tz="UTC")
-    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs ignores)")
+    # FIX 2026-05-20 : tolerance 10 min sur BOT_START_TS.
+    # Avant : strict < BOT_START_TS -> ratait les setups frais qui arrivaient juste
+    # avant le demarrage (ex : 13 trades rates aujourd'hui dont entry encore valide).
+    # Maintenant : accepte les setups jusqu'a 10 min avant le boot.
+    # Le filtre age_setup_min > 60 dans execute_setup garde la securite ultime.
+    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=10)
+    log.info(f"BOT_START_TS = {BOT_START_TS} (setups <10min avant boot OK, plus vieux ignores)")
 
     # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
     try:
