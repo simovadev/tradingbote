@@ -227,12 +227,13 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     )
     obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
-    # 3. Filtre : on ne s'interesse qu'aux OB RECENTS
-    # FIX 2026-05-20 : retour a 60 min (15 min etait trop restrictif).
-    # User a vu OB_60min=5 sur XAUUSD mais OB_15min=1 -> le bot ratait 4 setups sur 5.
-    # BOT_START_TS empeche deja de re-placer des vieux setups au restart.
+    # 3. Filtre : OB EN DIRECT seulement (user 2026-05-20).
+    # ICT/SMC : un OB doit etre detecte sur la bougie qui vient de fermer.
+    # Le delai de 60min est l'EXPIRATION du LIMIT (temps pour pullback), pas la fenetre
+    # de detection. recent_cutoff = 3 min : tolere 2-3 scans (5s chacun) + le temps
+    # que MSS confirme apres l'OB.
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=60)
+    recent_cutoff = now - pd.Timedelta(minutes=3)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
@@ -333,7 +334,7 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     # === FIX 2026-05-20 : check derive prix + fraicheur setup ===
     # 1. Age du setup : si OB valide y'a >5 min, le marche a probablement bouge trop
     age_setup_min = (pd.Timestamp.now(tz="UTC") - ob.validation_ts).total_seconds() / 60
-    if age_setup_min > 60:
+    if age_setup_min > 5:
         log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
         return False
 
