@@ -44,7 +44,46 @@ def load(
             f"  -> Lancer : python -m data.fetch --instrument {instrument} --tf {tf}"
         )
 
-    df = pd.read_parquet(path)
+    # OPTIM V5 (2026-05-20) : si start/end fournis, on lit le parquet par row groups
+    # (pyarrow filters) au lieu de charger les 2.6M bougies puis slicer.
+    # Gain : ~10x moins d'I/O sur les chunks 3 mois (130k au lieu 2.6M).
+    if start is not None or end is not None:
+        try:
+            import pyarrow.parquet as pq
+            pf = pq.ParquetFile(path)
+            # Lecture par row groups, on filtre apres lecture de chaque groupe.
+            # Le parquet est trie par timestamp donc on peut skip les groups hors fenetre.
+            dfs = []
+            for rg_idx in range(pf.num_row_groups):
+                rg_meta = pf.metadata.row_group(rg_idx)
+                # Tente de recuperer min/max du row group (col index)
+                ts_col = None
+                for i in range(rg_meta.num_columns):
+                    col = rg_meta.column(i)
+                    if col.path_in_schema in ("__index_level_0__", "time", "timestamp"):
+                        ts_col = col
+                        break
+                if ts_col is not None and ts_col.statistics is not None:
+                    rg_min = pd.Timestamp(ts_col.statistics.min)
+                    rg_max = pd.Timestamp(ts_col.statistics.max)
+                    if rg_min.tz is None:
+                        rg_min = rg_min.tz_localize("UTC")
+                    if rg_max.tz is None:
+                        rg_max = rg_max.tz_localize("UTC")
+                    if end is not None and rg_min > end:
+                        continue
+                    if start is not None and rg_max < start:
+                        continue
+                df_rg = pf.read_row_group(rg_idx).to_pandas()
+                dfs.append(df_rg)
+            if dfs:
+                df = pd.concat(dfs)
+            else:
+                df = pd.read_parquet(path)
+        except Exception:
+            df = pd.read_parquet(path)
+    else:
+        df = pd.read_parquet(path)
 
     if df.index.tz is None:
         df.index = df.index.tz_localize("UTC")

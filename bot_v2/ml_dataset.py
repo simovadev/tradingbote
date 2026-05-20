@@ -298,26 +298,32 @@ def _process_instrument(args):
     htf2_name = chain["htf2"]
 
     try:
-        # REVERT optim cache worker (deadlock pandas+multiprocessing sur Linux,
-        # cf commit 9e50ed2). On recharge les data par chunk (stable).
-        df_ltf = load(inst, ltf_name)
-        df_htf = load(inst, htf_name)
+        # OPTIM V5 (2026-05-20) : on charge UNIQUEMENT la fenetre du chunk + buffer.
+        # Buffer = 30j avant pour avoir les swings/OB HTF anterieurs au chunk.
+        # Avant : chaque worker chargeait 2.6M bougies M1, ~25s/chunk d'I/O.
+        # Maintenant : ~130k bougies M1 (3 mois + buffer), ~3s/chunk.
+        buffer_before = pd.Timedelta(days=30)
+        load_start = start_ts - buffer_before
+        load_end = end_ts
+
+        df_ltf = load(inst, ltf_name, start=load_start, end=load_end)
+        df_htf = load(inst, htf_name, start=load_start, end=load_end)
         try:
-            df_htf2 = load(inst, htf2_name)
+            df_htf2 = load(inst, htf2_name, start=load_start, end=load_end)
         except Exception:
             df_htf2 = None
         try:
-            df_d1 = load(inst, "D1")
+            df_d1 = load(inst, "D1", start=load_start, end=load_end)
             if len(df_d1) < 10:
                 raise FileNotFoundError
         except Exception:
-            df_h1 = load(inst, "H1")
+            df_h1 = load(inst, "H1", start=load_start, end=load_end)
             df_d1 = build_d1_from_h1(df_h1)
 
         htf_dfs_swings = {}
         for tf in ["H1", "H4", "D1"]:
             try:
-                htf_dfs_swings[tf] = load(inst, tf)
+                htf_dfs_swings[tf] = load(inst, tf, start=load_start, end=load_end)
             except Exception:
                 pass
         htf_swings = collect_htf_swings(htf_dfs_swings, swing_strength=3)
@@ -330,7 +336,7 @@ def _process_instrument(args):
         correlated_dfs = {}
         for corr_name, corr_type in SMT_PAIRS.get(inst, []):
             try:
-                df_c = load(corr_name, ltf_name)
+                df_c = load(corr_name, ltf_name, start=load_start, end=load_end)
                 if len(df_c) > 0:
                     mask_c = (df_c.index >= start_ts) & (df_c.index <= end_ts)
                     correlated_dfs[corr_name] = (df_c[mask_c], corr_type)
