@@ -49,6 +49,7 @@ from bot_v2.concepts.mss_setup import detect_mss_setups, confirm_ob_with_mss
 from bot_v2.concepts.order_block import detect_order_blocks
 from bot_v2.concepts.structure import detect_structure_breaks, detect_trend
 from bot_v2.config import SMT_PAIRS, INSTRUMENTS, get_param
+from bot_v2.data_buffer import DataBuffer
 from bot_v2.live_state import LiveState
 from bot_v2.mt5_executor import MT5Executor
 from bot_v2.pipeline import evaluate_ob
@@ -99,17 +100,20 @@ RISK_PCT_TEST = 0.02
 BOT_MAGIC = 20260517
 
 # History candles to fetch
-# V5.2 (2026-05-20) : aligne sur TRAIN V5 (3 mois + 30j buffer) pour que le live
-# voit la meme chose que le training. Avant : 2000 M1 = 33h -> probas live
-# plafonnees a 0.49 car features (swings HTF, obs HTF, fib_range, parent_ob)
-# calculees sur fenetre 65x plus petite que le training.
-# V5.3 (2026-05-21) : MT5 limite stricte ~80k bougies via copy_rates_from_pos
-# (testee sur Vantage : >=100k -> "Terminal: Invalid params").
-# On reste a 80000 M1 = ~55 jours = ~2 mois (toujours bien mieux que 2000).
-N_BARS_M1 = 80000    # ~55 jours (max MT5/Vantage)
-N_BARS_M15 = 5500    # ~55 jours (M15 = 96 bougies/jour)
-N_BARS_H1 = 1320     # ~55 jours (H1 = 24 bougies/jour)
-N_BARS_D1 = 100      # deja OK
+# V5.4 (2026-05-21) : utilise DataBuffer (data_vantage/) au lieu de MT5 direct.
+# Avantages :
+#   - 7+ mois d'historique (vs limite MT5 80k = 55j)
+#   - Scan plus rapide (lit en memoire au lieu de fetch MT5)
+#   - Auto-update : a chaque scan, ajoute juste les nouvelles bougies
+#   - Auto-save : sauve sur disque toutes les 5 min
+# Les variables N_BARS_* ne sont plus utilisees (le buffer charge tout).
+N_BARS_M1 = 80000    # fallback si buffer KO
+N_BARS_M15 = 5500
+N_BARS_H1 = 1320
+N_BARS_D1 = 100
+
+# Buffers data par actif (init dans main(), un par asset)
+DATA_BUFFERS: dict[str, "DataBuffer"] = {}
 
 
 def get_risk_pct(balance: float) -> float:
@@ -209,57 +213,72 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     _scan_start = _time.time()
     _timings = {}
 
-    # 1. Fetch les bougies
-    # force_sync=True : force MT5 a se sync avec le broker avant fetch M1
-    # -> elimine la latence de propagation, permet recent_cutoff plus strict
+    # 1. Buffer M1 (V5.4 : 7+ mois d'historique en memoire, vs limite MT5 80k)
     _t = _time.time()
-    df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1, force_sync=True)
-    _timings["fetch_m1"] = _time.time() - _t
-    if df_m1 is None or len(df_m1) < 200:
-        if debug_diag:
-            log.info(f"DIAG {instrument}: M1 KO (df_m1={None if df_m1 is None else len(df_m1)} bougies)")
-        return []
-
-    # FIX 2026-05-20 : virer la DERNIERE bougie M1 (souvent en cours, pas close)
-    # Sinon le bot detecte des OB sur bougie incomplete -> setup change a chaque tick
-    df_m1 = df_m1.iloc[:-1]
-
-    _t = _time.time()
-    df_m15 = mt5_exec.get_bars(instrument, "M15", N_BARS_M15)
-    df_h1 = mt5_exec.get_bars(instrument, "H1", N_BARS_H1)
-    _timings["fetch_htf"] = _time.time() - _t
-    if df_m15 is None or df_h1 is None:
-        return []
-    # FIX : pareil pour M15 et H1 (bougie courante en formation)
-    df_m15 = df_m15.iloc[:-1]
-    df_h1 = df_h1.iloc[:-1]
-
-    # D1 : build depuis H1 (pas toujours dispo natif chez les brokers)
-    try:
-        df_d1 = mt5_exec.get_bars(instrument, "D1", N_BARS_D1)
+    buffer = DATA_BUFFERS.get(instrument)
+    if buffer is None:
+        # Fallback : fetch direct MT5 (max 80k)
+        log.warning(f"DIAG {instrument}: pas de buffer, fallback fetch MT5")
+        df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1, force_sync=True)
+        if df_m1 is None or len(df_m1) < 200:
+            if debug_diag:
+                log.info(f"DIAG {instrument}: M1 KO (fallback)")
+            return []
+        df_m1 = df_m1.iloc[:-1]
+        df_m15 = mt5_exec.get_bars(instrument, "M15", N_BARS_M15)
+        df_h1 = mt5_exec.get_bars(instrument, "H1", N_BARS_H1)
+        if df_m15 is None or df_h1 is None:
+            return []
+        df_m15 = df_m15.iloc[:-1]
+        df_h1 = df_h1.iloc[:-1]
+        try:
+            df_d1 = mt5_exec.get_bars(instrument, "D1", N_BARS_D1)
+            if df_d1 is None or len(df_d1) < 10:
+                raise ValueError
+        except Exception:
+            df_d1 = build_d1_from_h1(df_h1)
+        try:
+            df_h4 = mt5_exec.get_bars(instrument, "H4", 500)
+        except Exception:
+            df_h4 = None
+    else:
+        # Buffer disponible : update (ajoute nouvelles M1) puis lit tout en memoire
+        n_new = buffer.update()
+        if debug_diag and n_new > 0:
+            log.info(f"BUFFER {instrument}: +{n_new} nouvelles M1")
+        df_m1 = buffer.get_m1()
+        if df_m1 is None or len(df_m1) < 200:
+            if debug_diag:
+                log.info(f"DIAG {instrument}: buffer M1 vide")
+            return []
+        df_m1 = df_m1.iloc[:-1]  # vire bougie en cours
+        df_m15 = buffer.get_m15(n=N_BARS_M15)
+        df_h1 = buffer.get_h1(n=N_BARS_H1)
+        df_h4 = buffer.get_h4(n=500)
+        df_d1 = buffer.get_d1(n=N_BARS_D1)
         if df_d1 is None or len(df_d1) < 10:
-            raise ValueError
-    except Exception:
-        df_d1 = build_d1_from_h1(df_h1)
+            df_d1 = build_d1_from_h1(df_h1)
+    _timings["fetch_m1"] = _time.time() - _t
+    _timings["fetch_htf"] = 0  # inclus dans fetch_m1 si buffer
 
     # HTF swings (D1, H4, H1)
     _t = _time.time()
     htf_dfs: dict[str, pd.DataFrame] = {"H1": df_h1, "D1": df_d1}
-    try:
-        df_h4 = mt5_exec.get_bars(instrument, "H4", 500)
-        if df_h4 is not None and len(df_h4) > 0:
-            htf_dfs["H4"] = df_h4
-    except Exception:
-        pass
+    if df_h4 is not None and len(df_h4) > 0:
+        htf_dfs["H4"] = df_h4
     htf_swings = collect_htf_swings(htf_dfs, swing_strength=3)
     _timings["htf_swings"] = _time.time() - _t
 
-    # SMT correles
+    # SMT correles (depuis buffer si dispo)
     _t = _time.time()
     correlated_dfs = {}
     for corr_name, corr_type in SMT_PAIRS.get(instrument, []):
+        corr_buffer = DATA_BUFFERS.get(corr_name)
         try:
-            df_c = mt5_exec.get_bars(corr_name, "M1", N_BARS_M1)
+            if corr_buffer is not None:
+                df_c = corr_buffer.get_m1(n=N_BARS_M1)
+            else:
+                df_c = mt5_exec.get_bars(corr_name, "M1", N_BARS_M1)
             if df_c is not None and len(df_c) > 0:
                 correlated_dfs[corr_name] = (df_c, corr_type)
         except Exception:
@@ -1178,6 +1197,29 @@ def run_live(test_dry_run: bool = False):
     # juste avant le demarrage du bot (sinon premiers OBs systematiquement rejetes).
     BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=1)
     log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs ignores, tolerance 1min)")
+
+    # V5.4 : init DataBuffer pour chaque actif (charge parquet 7mois + comble trou via MT5)
+    log.info("=" * 70)
+    log.info("INIT DATA BUFFERS (charge 7mois historique + comble trou via MT5)")
+    log.info("=" * 70)
+    _buffer_assets = list(LIVE_ASSETS)
+    # Ajoute les correles SMT (XAGUSD, DXY, SPX500) si presents
+    for asset in LIVE_ASSETS:
+        for corr_name, _ in SMT_PAIRS.get(asset, []):
+            if corr_name not in _buffer_assets:
+                _buffer_assets.append(corr_name)
+    for asset in _buffer_assets:
+        try:
+            buf = DataBuffer(asset=asset, mt5_exec=mt5_exec)
+            if buf.load_and_fill():
+                DATA_BUFFERS[asset] = buf
+                log.info(f"  BUFFER {asset:<8} : OK ({len(buf.df_m1):,} M1)")
+            else:
+                log.warning(f"  BUFFER {asset:<8} : KO (fallback fetch MT5)")
+        except Exception as e:
+            log.error(f"  BUFFER {asset:<8} : exception {e}")
+    log.info(f"Buffers initialises : {len(DATA_BUFFERS)} actifs")
+    log.info("=" * 70)
 
     # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
     try:
