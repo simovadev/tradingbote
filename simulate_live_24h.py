@@ -39,8 +39,8 @@ from bot_v2 import ml_filter
 
 
 ML_THRESHOLD = 0.75
-BALANCE = 154.96
-RISK_PCT = 0.01
+BALANCE = 60.0    # IDENTIQUE training V5
+RISK_PCT = 0.10   # IDENTIQUE training V5 (10%)
 
 # Fenetre live = 3 mois en arriere (comme le bot live aujourd'hui)
 LOOKBACK_DAYS = 90
@@ -188,6 +188,7 @@ def main():
         setup = r.trade_setup
         lots, risk_usd = compute_position_size(setup.entry_price, setup.stop_loss, asset, balance=BALANCE, risk_pct=RISK_PCT)
         if lots <= 0:
+            rejets[f"lots<=0_proba{proba:.2f}"] = rejets.get(f"lots<=0_proba{proba:.2f}", 0) + 1
             continue
         sim_setup = TradeSetup(
             instrument=asset, direction=setup.direction,
