@@ -240,19 +240,49 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     if debug_diag:
         from bot_v2.concepts.killzones import killzone_at
         last_ts = df_m1.index[-1]
-        # Affiche aussi tous les OB confirmes (recents OU non) pour voir s'il y a eu activite
         latest_ob_ts = "aucun"
         if obs_confirmed:
             latest_ob_ts = df_m1.index[max(ob.validation_index for ob in obs_confirmed)]
         kz_now = killzone_at(last_ts) or "AUCUNE"
-        # Compte aussi sur 60 min pour comparaison (vs notre fenetre 15 min)
         cutoff_60 = last_ts - pd.Timedelta(minutes=60)
+        cutoff_15 = last_ts - pd.Timedelta(minutes=15)
         n_obs_60min = sum(1 for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_60)
+        n_obs_15min = sum(1 for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_15)
         log.info(
             f"DIAG {instrument}: M1={len(df_m1)} M15={len(df_m15)} H1={len(df_h1)} "
             f"last_bar={last_ts} kz={kz_now} | OB_brut={len(obs)} OB+MSS={len(obs_confirmed)} "
-            f"latest_OB_MSS_ts={latest_ob_ts} OB_60min={n_obs_60min} OB_15min={len(obs_recent)}"
+            f"latest_OB_MSS_ts={latest_ob_ts} OB_60min={n_obs_60min} OB_15min={n_obs_15min} OB_cutoff={len(obs_recent)}"
         )
+
+        # NOUVEAU : pour chaque OB des 15 dernieres minutes (meme ceux hors cutoff),
+        # affiche son verdict pipeline+ML pour comprendre pourquoi pas tradé.
+        obs_15min = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_15]
+        if obs_15min and instrument == "XAUUSD":  # eviter spam, debug XAUUSD uniquement
+            loaded_diag = load_model(instrument)
+            if loaded_diag is not None:
+                model_d, features_d = loaded_diag
+                thr_d = ml_filter.get_dynamic_threshold(instrument, balance)
+                for ob in obs_15min:
+                    obts = df_m1.index[ob.validation_index]
+                    age_min = (last_ts - obts).total_seconds() / 60
+                    try:
+                        r_d = evaluate_ob(
+                            ob, df_m1, df_m15, df_d1, instrument,
+                            ltf_name="M1", htf_name="M15",
+                            df_htf2=df_h1, htf2_name="H1",
+                            correlated_dfs=correlated_dfs,
+                            htf_swings=htf_swings,
+                            df_h1=df_h1, min_score=0, min_quality=0,
+                            cache=cache,
+                        )
+                        if r_d.verdict == "TRADE" and r_d.trade_setup is not None:
+                            proba_d = predict_proba(model_d, features_d, r_d, ob, instrument)
+                            verdict_d = f"TRADE ml={proba_d:.3f} {'OK' if proba_d >= thr_d else f'<{thr_d}'}"
+                        else:
+                            verdict_d = f"REJET: {(r_d.rejection_reason or 'no_trade')[:40]}"
+                    except Exception as e:
+                        verdict_d = f"EXCEPTION: {str(e)[:30]}"
+                    log.info(f"  DIAG {instrument} 15min OB | ts={obts} age={age_min:.1f}min | {verdict_d}")
 
     if not obs_recent:
         return []
