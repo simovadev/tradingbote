@@ -234,10 +234,17 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
+        from bot_v2.concepts.killzones import killzone_at
         last_ts = df_m1.index[-1]
+        # Affiche aussi tous les OB confirmes (recents OU non) pour voir s'il y a eu activite
+        latest_ob_ts = "aucun"
+        if obs_confirmed:
+            latest_ob_ts = df_m1.index[max(ob.validation_index for ob in obs_confirmed)]
+        kz_now = killzone_at(last_ts) or "AUCUNE"
         log.info(
             f"DIAG {instrument}: M1={len(df_m1)} M15={len(df_m15)} H1={len(df_h1)} "
-            f"last_bar={last_ts} | OB_brut={len(obs)} OB+MSS={len(obs_confirmed)} OB_recent={len(obs_recent)}"
+            f"last_bar={last_ts} kz={kz_now} | OB_brut={len(obs)} OB+MSS={len(obs_confirmed)} "
+            f"latest_OB_MSS_ts={latest_ob_ts} OB_recent_15min={len(obs_recent)}"
         )
 
     if not obs_recent:
@@ -558,6 +565,123 @@ def reconcile_closed_trades(mt5_exec: MT5Executor, state: LiveState):
         log.info(f"TRADE CLOSED ticket={ticket} {outcome} pnl={pnl:+.2f}€")
 
 
+# ========== DIAGNOSTICS AU DEMARRAGE ==========
+
+def boot_diagnostics(mt5_exec: MT5Executor, state: LiveState):
+    """Audit complet au demarrage : fetch + OB detection + symboles + killzone.
+
+    But : reveler tout probleme structurel AVANT d'attendre des trades.
+    User 2026-05-20 : "fait des debug pour trouver tout au lieu d'attendre".
+    """
+    from bot_v2.concepts.killzones import killzone_at, to_ny_time
+
+    log.info("=" * 70)
+    log.info("BOOT DIAGNOSTICS - audit de tous les actifs")
+    log.info("=" * 70)
+
+    # === 1. Heure broker vs heure UTC reelle ===
+    utc_now = pd.Timestamp.now(tz="UTC")
+    # Recupere la derniere bougie M1 EURUSD pour deduire le broker time
+    df_test = mt5_exec.get_bars("EURUSD", "M1", 5)
+    if df_test is not None and len(df_test) > 0:
+        broker_last = df_test.index[-1]
+        offset_min = (broker_last - utc_now).total_seconds() / 60
+        log.info(
+            f"TIME | UTC reel = {utc_now.strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"Broker last M1 = {broker_last.strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"offset = {offset_min:+.1f} min"
+        )
+        if abs(offset_min) > 30:
+            log.warning(
+                f"!! BROKER TIME != UTC ({offset_min:+.1f} min). "
+                f"Les bougies sont en time broker traite comme UTC. "
+                f"Killzones peuvent etre decalees."
+            )
+    else:
+        log.error("TIME | impossible de fetch EURUSD M1 pour deduire broker time")
+
+    # === 2. Killzone actuelle ===
+    kz = killzone_at(utc_now)
+    ny_time = to_ny_time(utc_now).strftime('%H:%M')
+    log.info(f"KILLZONE | UTC={utc_now.strftime('%H:%M')} NY={ny_time} -> {kz or 'AUCUNE'}")
+
+    # === 3. Audit par actif : symbole + bougies + OB ===
+    log.info("-" * 70)
+    log.info(f"{'ACTIF':<10}{'SYMBOL_BROKER':<18}{'TICK':<10}{'M1':<8}{'M15':<8}{'H1':<8}{'OB_brut':<10}{'OB+MSS':<10}")
+    log.info("-" * 70)
+
+    from bot_v2.mt5_executor import to_broker_symbol
+    from bot_v2.concepts.order_block import detect_order_blocks
+    from bot_v2.concepts.mss_setup import detect_mss_setups, confirm_ob_with_mss
+    from bot_v2.concepts.liquidity import find_swings
+    from bot_v2.concepts.structure import detect_structure_breaks
+
+    issues = []
+    for asset in LIVE_ASSETS:
+        broker_sym = to_broker_symbol(asset)
+        # Tick
+        tick = mt5_exec.get_tick(asset)
+        tick_ok = "OK" if tick and tick.bid > 0 else "KO"
+        # Bougies
+        df_m1 = mt5_exec.get_bars(asset, "M1", 200)
+        df_m15 = mt5_exec.get_bars(asset, "M15", 200)
+        df_h1 = mt5_exec.get_bars(asset, "H1", 200)
+        n_m1 = len(df_m1) if df_m1 is not None else 0
+        n_m15 = len(df_m15) if df_m15 is not None else 0
+        n_h1 = len(df_h1) if df_h1 is not None else 0
+
+        n_ob = 0
+        n_ob_mss = 0
+        if df_m1 is not None and len(df_m1) >= 100:
+            try:
+                sws = get_param(asset, "swing_strength_m1", 2)
+                obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+                n_ob = len(obs)
+                swings = find_swings(df_m1, strength=sws)
+                sb = detect_structure_breaks(df_m1, swings=swings)
+                mss = detect_mss_setups(df_m1, structure_breaks=sb, swings=swings)
+                obs_conf = confirm_ob_with_mss(obs, mss, window_bars=10)
+                n_ob_mss = len(obs_conf)
+            except Exception as e:
+                log.debug(f"DIAG {asset} OB detection failed: {e}")
+
+        log.info(
+            f"{asset:<10}{broker_sym:<18}{tick_ok:<10}{n_m1:<8}{n_m15:<8}{n_h1:<8}{n_ob:<10}{n_ob_mss:<10}"
+        )
+
+        # Flag les anomalies
+        if tick_ok == "KO":
+            issues.append(f"{asset}: TICK KO - symbole non disponible chez broker")
+        if n_m1 < 100:
+            issues.append(f"{asset}: M1 insuffisant ({n_m1} bougies)")
+        if n_ob == 0 and tick_ok == "OK":
+            issues.append(f"{asset}: AUCUN OB detecte (verifier swing_strength ou data)")
+
+    log.info("-" * 70)
+
+    # === 4. Resume des anomalies ===
+    if issues:
+        log.warning(f"!! {len(issues)} ANOMALIES DETECTEES :")
+        for iss in issues:
+            log.warning(f"   - {iss}")
+    else:
+        log.info("OK : aucune anomalie detectee - tous les actifs sont fetchables")
+
+    # === 5. Etat MT5 pending/positions ===
+    positions = mt5_exec.get_positions()
+    pendings = mt5_exec.get_pending_orders(magic=BOT_MAGIC)
+    log.info(f"MT5 | positions ouvertes = {len(positions)} | pending orders bot = {len(pendings)}")
+    for p in positions:
+        log.info(f"   POS {p.get('symbol')} ticket={p.get('ticket')} vol={p.get('volume')}")
+    for po in pendings:
+        age = (utc_now - po["time_setup"]).total_seconds() / 60
+        log.info(f"   PEND {po['symbol']} ticket={po['ticket']} age={age:.1f}min")
+
+    log.info("=" * 70)
+    log.info("FIN BOOT DIAGNOSTICS")
+    log.info("=" * 70)
+
+
 # ========== MAIN LOOP ==========
 
 def run_live(test_dry_run: bool = False):
@@ -601,6 +725,12 @@ def run_live(test_dry_run: bool = False):
     # deja passes (ou deja tradés avant restart).
     BOT_START_TS = pd.Timestamp.now(tz="UTC")
     log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs ignores)")
+
+    # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
+    try:
+        boot_diagnostics(mt5_exec, state)
+    except Exception as e:
+        log.exception(f"Boot diagnostics failed (continue quand meme) : {e}")
 
     try:
         while True:
