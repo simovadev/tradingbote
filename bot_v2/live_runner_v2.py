@@ -202,10 +202,16 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     Returns:
         Liste de setups valides PRETS a etre executes (deja filtres ML, hors cooldown).
     """
+    import time as _time
+    _scan_start = _time.time()
+    _timings = {}
+
     # 1. Fetch les bougies
     # force_sync=True : force MT5 a se sync avec le broker avant fetch M1
     # -> elimine la latence de propagation, permet recent_cutoff plus strict
+    _t = _time.time()
     df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1, force_sync=True)
+    _timings["fetch_m1"] = _time.time() - _t
     if df_m1 is None or len(df_m1) < 200:
         if debug_diag:
             log.info(f"DIAG {instrument}: M1 KO (df_m1={None if df_m1 is None else len(df_m1)} bougies)")
@@ -215,8 +221,10 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # Sinon le bot detecte des OB sur bougie incomplete -> setup change a chaque tick
     df_m1 = df_m1.iloc[:-1]
 
+    _t = _time.time()
     df_m15 = mt5_exec.get_bars(instrument, "M15", N_BARS_M15)
     df_h1 = mt5_exec.get_bars(instrument, "H1", N_BARS_H1)
+    _timings["fetch_htf"] = _time.time() - _t
     if df_m15 is None or df_h1 is None:
         return []
     # FIX : pareil pour M15 et H1 (bougie courante en formation)
@@ -232,6 +240,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
         df_d1 = build_d1_from_h1(df_h1)
 
     # HTF swings (D1, H4, H1)
+    _t = _time.time()
     htf_dfs: dict[str, pd.DataFrame] = {"H1": df_h1, "D1": df_d1}
     try:
         df_h4 = mt5_exec.get_bars(instrument, "H4", 500)
@@ -240,8 +249,10 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     except Exception:
         pass
     htf_swings = collect_htf_swings(htf_dfs, swing_strength=3)
+    _timings["htf_swings"] = _time.time() - _t
 
     # SMT correles
+    _t = _time.time()
     correlated_dfs = {}
     for corr_name, corr_type in SMT_PAIRS.get(instrument, []):
         try:
@@ -250,8 +261,10 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                 correlated_dfs[corr_name] = (df_c, corr_type)
         except Exception:
             continue
+    _timings["smt_fetch"] = _time.time() - _t
 
     # 2. Detection OB+MSS
+    _t = _time.time()
     sws = get_param(instrument, "swing_strength_m1", 2)
     obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
     cache = {
@@ -263,10 +276,12 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     cache["structure_breaks"] = detect_structure_breaks(df_m1, swings=cache["swings_ltf"])
     cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
     cache["obs_htf2"] = detect_order_blocks(df_h1)
+    _timings["cache_build"] = _time.time() - _t
 
     mss_setups = detect_mss_setups(
         df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"]
     )
+    _timings["mss_detect"] = _time.time() - _t
     # V5.1 (2026-05-20) : virer filtre dur confirm_ob_with_mss.
     # Le ML decide via feature has_mss_nearby (aligne avec V5 training).
     obs_confirmed = obs
@@ -404,6 +419,12 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                 f"(seuil={threshold:.2f})"
             )
         log.info(f"DIAG {instrument}: rejets = {dict(sorted(diag_reasons.items(), key=lambda x: -x[1]))}{proba_summary}")
+
+    # V5.2 : log latence totale scan + breakdown
+    _scan_total = _time.time() - _scan_start
+    _timings["pipeline_eval"] = _scan_total - sum(_timings.values())
+    _bd = " ".join([f"{k}={v*1000:.0f}ms" for k, v in _timings.items()])
+    log.info(f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | {_bd}")
 
     return valid_setups
 
