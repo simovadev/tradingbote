@@ -27,42 +27,27 @@ _FEATURES_BY_TF: dict[str, Path] = {
     "M5": Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_M5.json"),
 }
 
-# V4 (user 2026-05-20) : Models V3.5 Admiral 8 ans pour 14 actifs
-# WR @ 0.70 entre 73% et 80%, AUC 0.78-0.81
+# V4 (user 2026-05-20) : displacement dynamique. Fallback V3.5 si V4 absent.
 _MBASE = "c:/Users/Shadow/TradingBot/bot_v2"
-_MODELS_BY_INSTRUMENT: dict[str, Path] = {
-    "XAUUSD": Path(f"{_MBASE}/ml_model_XAUUSD_admiral_v3_5.pkl"),
-    "NAS100": Path(f"{_MBASE}/ml_model_NAS100_admiral_v3_5.pkl"),
-    "GER40":  Path(f"{_MBASE}/ml_model_GER40_admiral_v3_5.pkl"),
-    "BTCUSD": Path(f"{_MBASE}/ml_model_BTCUSD_admiral_v3_5.pkl"),
-    "EURUSD": Path(f"{_MBASE}/ml_model_EURUSD_admiral_v3_5.pkl"),
-    "GBPUSD": Path(f"{_MBASE}/ml_model_GBPUSD_admiral_v3_5.pkl"),
-    "AUDUSD": Path(f"{_MBASE}/ml_model_AUDUSD_admiral_v3_5.pkl"),
-    "USDJPY": Path(f"{_MBASE}/ml_model_USDJPY_admiral_v3_5.pkl"),
-    "SP500":  Path(f"{_MBASE}/ml_model_SP500_admiral_v3_5.pkl"),
-    "DJ30":   Path(f"{_MBASE}/ml_model_DJ30_admiral_v3_5.pkl"),
-    "UK100":  Path(f"{_MBASE}/ml_model_UK100_admiral_v3_5.pkl"),
-    "FRA40":  Path(f"{_MBASE}/ml_model_FRA40_admiral_v3_5.pkl"),
-    "USDCAD": Path(f"{_MBASE}/ml_model_USDCAD_admiral_v3_5.pkl"),
-    "USDCHF": Path(f"{_MBASE}/ml_model_USDCHF_admiral_v3_5.pkl"),
-    # JP225 desactive (ecart Duka/Vantage trop grand)
-}
-_FEATURES_BY_INSTRUMENT: dict[str, Path] = {
-    "XAUUSD": Path(f"{_MBASE}/ml_features_XAUUSD_admiral_v3_5.json"),
-    "NAS100": Path(f"{_MBASE}/ml_features_NAS100_admiral_v3_5.json"),
-    "GER40":  Path(f"{_MBASE}/ml_features_GER40_admiral_v3_5.json"),
-    "BTCUSD": Path(f"{_MBASE}/ml_features_BTCUSD_admiral_v3_5.json"),
-    "EURUSD": Path(f"{_MBASE}/ml_features_EURUSD_admiral_v3_5.json"),
-    "GBPUSD": Path(f"{_MBASE}/ml_features_GBPUSD_admiral_v3_5.json"),
-    "AUDUSD": Path(f"{_MBASE}/ml_features_AUDUSD_admiral_v3_5.json"),
-    "USDJPY": Path(f"{_MBASE}/ml_features_USDJPY_admiral_v3_5.json"),
-    "SP500":  Path(f"{_MBASE}/ml_features_SP500_admiral_v3_5.json"),
-    "DJ30":   Path(f"{_MBASE}/ml_features_DJ30_admiral_v3_5.json"),
-    "UK100":  Path(f"{_MBASE}/ml_features_UK100_admiral_v3_5.json"),
-    "FRA40":  Path(f"{_MBASE}/ml_features_FRA40_admiral_v3_5.json"),
-    "USDCAD": Path(f"{_MBASE}/ml_features_USDCAD_admiral_v3_5.json"),
-    "USDCHF": Path(f"{_MBASE}/ml_features_USDCHF_admiral_v3_5.json"),
-}
+
+ALL_ASSETS = ["XAUUSD", "NAS100", "GER40", "BTCUSD",
+              "EURUSD", "GBPUSD", "AUDUSD", "USDJPY",
+              "SP500", "DJ30", "UK100", "FRA40",
+              "USDCAD", "USDCHF"]
+
+def _pick_model(asset: str) -> Path:
+    """Cherche V4 d'abord, fallback V3.5."""
+    v4 = Path(f"{_MBASE}/ml_model_{asset}_admiral_v4.pkl")
+    v3_5 = Path(f"{_MBASE}/ml_model_{asset}_admiral_v3_5.pkl")
+    return v4 if v4.exists() else v3_5
+
+def _pick_features(asset: str) -> Path:
+    v4 = Path(f"{_MBASE}/ml_features_{asset}_admiral_v4.json")
+    v3_5 = Path(f"{_MBASE}/ml_features_{asset}_admiral_v3_5.json")
+    return v4 if v4.exists() else v3_5
+
+_MODELS_BY_INSTRUMENT: dict[str, Path] = {a: _pick_model(a) for a in ALL_ASSETS}
+_FEATURES_BY_INSTRUMENT: dict[str, Path] = {a: _pick_features(a) for a in ALL_ASSETS}
 
 # Models specifiques par (INSTRUMENT, TF) — user 2026-05-16
 # Fallback : modele instrument generique, puis modele TF generique

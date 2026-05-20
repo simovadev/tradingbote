@@ -130,13 +130,38 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
+    """Charge le meilleur modele disponible : V4 > V3.5 > V2 (legacy).
+
+    FIX MAJEUR 2026-05-20 : avant on chargeait ml_model_XAUUSD.pkl (V2 du 17 mai
+    sans features V3.5) -> probas catastrophiques. Maintenant on prend V4 si
+    disponible, sinon V3.5 (le bon modele d'Admiral 8 ans).
+    """
     if instrument in _models_cache:
         return _models_cache[instrument]
-    model_path = BOT_V2_DIR / f"ml_model_{instrument}.pkl"
-    feat_path = BOT_V2_DIR / f"ml_features_{instrument}.json"
-    if not model_path.exists():
-        log.warning(f"Modele manquant pour {instrument}, skip")
+
+    # Cascade : V4 > V3_5 > V2 legacy
+    candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v4.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_admiral_v4.json"),
+        (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v3_5.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_admiral_v3_5.json"),
+        (BOT_V2_DIR / f"ml_model_{instrument}.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}.json"),
+    ]
+    model_path = feat_path = None
+    version = None
+    for mp, fp in candidates:
+        if mp.exists() and fp.exists():
+            model_path = mp
+            feat_path = fp
+            version = "V4" if "_v4" in mp.name else ("V3.5" if "_v3_5" in mp.name else "V2-legacy")
+            break
+
+    if model_path is None:
+        log.warning(f"Modele manquant pour {instrument} (V4/V3.5/V2 tous absents), skip")
         return None
+
+    log.info(f"Modele {instrument} : {version} ({model_path.name})")
     with open(model_path, "rb") as f:
         model = pickle.load(f)
     features = json.load(open(feat_path))["features"]
