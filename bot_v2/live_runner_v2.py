@@ -103,9 +103,12 @@ BOT_MAGIC = 20260517
 # voit la meme chose que le training. Avant : 2000 M1 = 33h -> probas live
 # plafonnees a 0.49 car features (swings HTF, obs HTF, fib_range, parent_ob)
 # calculees sur fenetre 65x plus petite que le training.
-N_BARS_M1 = 130000   # ~90 jours (TRAIN = 3 mois)
-N_BARS_M15 = 8500    # ~90 jours
-N_BARS_H1 = 2200     # ~90 jours
+# V5.3 (2026-05-21) : MT5 limite stricte ~80k bougies via copy_rates_from_pos
+# (testee sur Vantage : >=100k -> "Terminal: Invalid params").
+# On reste a 80000 M1 = ~55 jours = ~2 mois (toujours bien mieux que 2000).
+N_BARS_M1 = 80000    # ~55 jours (max MT5/Vantage)
+N_BARS_M15 = 5500    # ~55 jours (M15 = 96 bougies/jour)
+N_BARS_H1 = 1320     # ~55 jours (H1 = 24 bougies/jour)
 N_BARS_D1 = 100      # deja OK
 
 
