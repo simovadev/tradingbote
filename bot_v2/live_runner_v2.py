@@ -224,11 +224,13 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     )
     obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
-    # 3. Filtre : on ne s'interesse qu'aux OB RECENTS (user 2026-05-18 : 10 min -> 60 min)
-    # OB+MSS Vizion prennent souvent 15-30 min entre OB et confirmation MSS finale
-    # Avec cooldown 15min/actif, pas de risque de re-prendre le meme setup
+    # 3. Filtre : on ne s'interesse qu'aux OB RECENTS
+    # FIX 2026-05-20 (user: "30-40min de retard") : 60 min -> 5 min
+    # Le check age_setup_min > 5 dans execute_setup rejetait deja les vieux setups,
+    # mais le scan les detectait quand meme -> bruit + impression de retard.
+    # Maintenant on les filtre des le scan : setup vu = setup frais (<5min).
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=60)
+    recent_cutoff = now - pd.Timedelta(minutes=5)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if not obs_recent:
