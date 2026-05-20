@@ -173,8 +173,13 @@ class MT5Executor:
 
     # ========== BOUGIES ==========
 
-    def get_bars(self, symbol: str, tf: str, n: int = 500) -> pd.DataFrame | None:
+    def get_bars(self, symbol: str, tf: str, n: int = 500, force_sync: bool = False) -> pd.DataFrame | None:
         """Recupere les N dernieres bougies cloturees pour symbol+TF.
+
+        Args:
+            force_sync: si True, force un fetch tick frais avant -> oblige MT5
+                a se synchroniser avec le broker. Ajoute ~50-100ms mais elimine
+                la latence de propagation des bougies M1 fraichement closes.
 
         Retourne un DataFrame compatible avec le pipeline existant
         (colonnes: open, high, low, close, volume + index timestamp UTC).
@@ -184,6 +189,14 @@ class MT5Executor:
             return None
 
         broker_sym = to_broker_symbol(symbol)
+
+        # Force sync : demande un tick frais d'abord (fait sync broker-side)
+        if force_sync:
+            try:
+                mt5.symbol_info_tick(broker_sym)
+            except Exception:
+                pass
+
         rates = mt5.copy_rates_from_pos(broker_sym, TF_MAP[tf], 0, n)
         if rates is None or len(rates) == 0:
             log.debug(f"Pas de data pour {symbol} {tf} : {mt5.last_error()}")

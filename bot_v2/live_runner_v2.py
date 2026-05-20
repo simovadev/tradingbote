@@ -163,7 +163,9 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
         Liste de setups valides PRETS a etre executes (deja filtres ML, hors cooldown).
     """
     # 1. Fetch les bougies
-    df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1)
+    # force_sync=True : force MT5 a se sync avec le broker avant fetch M1
+    # -> elimine la latence de propagation, permet recent_cutoff plus strict
+    df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1, force_sync=True)
     if df_m1 is None or len(df_m1) < 200:
         if debug_diag:
             log.info(f"DIAG {instrument}: M1 KO (df_m1={None if df_m1 is None else len(df_m1)} bougies)")
@@ -228,12 +230,11 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
     # 3. Filtre : OB EN DIRECT (user 2026-05-20).
-    # Une bougie M1 avec ts=10:01 couvre 10:01:00->10:01:59 et ferme a 10:02:00.
-    # L'OB se forme sur la bougie qui vient de fermer, donc visible avec ~1 min
-    # de delai entre formation et detection. recent_cutoff = 2 min permet de
-    # capturer la bougie qui vient de fermer + son scan suivant.
+    # Avec force_sync=True sur get_bars M1, MT5 est sync avec le broker -> pas
+    # de latence de propagation. recent_cutoff = 1 min = OB de la bougie qui
+    # vient de fermer.
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=2)
+    recent_cutoff = now - pd.Timedelta(minutes=1)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
