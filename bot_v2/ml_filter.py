@@ -77,20 +77,20 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
 # Strategie : seuil 0.70 minimum partout (WR >= 73% partout), montee 0.75 si
 # WR <75% au seuil 0.70.
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.70,  # TEST WR 73.0% @0.70, AUC 0.778
-    "NAS100": 0.70,  # TEST WR 76.3% @0.70, AUC 0.813
-    "GER40":  0.70,  # AUC 0.804
-    "BTCUSD": 0.70,  # TEST WR 73.8% @0.70, AUC 0.810
-    "EURUSD": 0.70,  # TEST WR 79.4% @0.70, AUC 0.808
-    "GBPUSD": 0.70,  # TEST WR 74.4% @0.70, AUC 0.804
-    "AUDUSD": 0.70,  # TEST WR 79.8% @0.70, AUC 0.811
-    "USDJPY": 0.70,  # TEST WR 75.0% @0.70, AUC 0.804
-    "SP500":  0.70,  # TEST WR 80.5% @0.70, AUC 0.801
-    "DJ30":   0.70,  # TEST WR 73.4% @0.70, AUC 0.792
-    "UK100":  0.70,  # TEST WR 72.8% @0.70, AUC 0.787
-    "FRA40":  0.70,  # TEST WR 75.1% @0.70, AUC 0.799
-    "USDCAD": 0.70,  # TEST WR 80.0% @0.70, AUC 0.786
-    "USDCHF": 0.70,  # TEST WR 77.7% @0.70, AUC 0.806
+    "XAUUSD": 0.55,  # TEST WR 73.0% @0.70, AUC 0.778
+    "NAS100": 0.55,  # TEST WR 76.3% @0.70, AUC 0.813
+    "GER40":  0.55,  # AUC 0.804
+    "BTCUSD": 0.55,  # TEST WR 73.8% @0.70, AUC 0.810
+    "EURUSD": 0.55,  # TEST WR 79.4% @0.70, AUC 0.808
+    "GBPUSD": 0.55,  # TEST WR 74.4% @0.70, AUC 0.804
+    "AUDUSD": 0.55,  # TEST WR 79.8% @0.70, AUC 0.811
+    "USDJPY": 0.55,  # TEST WR 75.0% @0.70, AUC 0.804
+    "SP500":  0.55,  # TEST WR 80.5% @0.70, AUC 0.801
+    "DJ30":   0.55,  # TEST WR 73.4% @0.70, AUC 0.792
+    "UK100":  0.55,  # TEST WR 72.8% @0.70, AUC 0.787
+    "FRA40":  0.55,  # TEST WR 75.1% @0.70, AUC 0.799
+    "USDCAD": 0.55,  # TEST WR 80.0% @0.70, AUC 0.786
+    "USDCHF": 0.55,  # TEST WR 77.7% @0.70, AUC 0.806
     # JP225 desactive (ecart Duka/Vantage trop grand)
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
