@@ -178,9 +178,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     return model, features
 
 
-def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None) -> float:
-    # FIX 2026-05-20 : passer df_ltf + df_d1 pour les features ATR + distance daily levels
-    feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1)
+def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, mss_setups=None) -> float:
+    # FIX V5.1 (2026-05-20) : passer mss_setups pour la feature has_mss_nearby.
+    # Sans ca, has_mss_nearby=0 toujours -> ML proba chute ~0.20 -> bot ne trade jamais.
+    feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups)
     X = pd.DataFrame([[feats.get(f, 0) for f in features]], columns=features)
     return float(model.predict_proba(X)[0, 1])
 
@@ -262,14 +263,16 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     mss_setups = detect_mss_setups(
         df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"]
     )
-    obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
+    # V5.1 (2026-05-20) : virer filtre dur confirm_ob_with_mss.
+    # Le ML decide via feature has_mss_nearby (aligne avec V5 training).
+    obs_confirmed = obs
 
     # 3. Filtre : OB EN DIRECT (user 2026-05-20).
-    # Avec force_sync=True sur get_bars M1, MT5 est sync avec le broker -> pas
-    # de latence de propagation. recent_cutoff = 1 min = OB de la bougie qui
-    # vient de fermer.
+    # V5.1 (2026-05-20) : recent_cutoff 1min -> 3min pour tolerer la latence MT5.
+    # Vantage RAW ECN propage parfois les M1 avec 1-2 min de delai -> OBs legitimes
+    # rejetes par cutoff 1 min. 3 min = bon compromis (pas trop d'OBs obsoletes).
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=1)
+    recent_cutoff = now - pd.Timedelta(minutes=3)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
@@ -312,11 +315,11 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                             cache=cache,
                         )
                         if r_d.verdict == "TRADE" and r_d.trade_setup is not None:
-                            proba_d = predict_proba(model_d, features_d, r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
+                            proba_d = predict_proba(model_d, features_d, r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
                             verdict_d = f"TRADE ml={proba_d:.3f} {'OK' if proba_d >= thr_d else f'<{thr_d}'}"
                             # DUMP FEATURES si XAUUSD et ml < 0.55 -> comprendre quelles features tirent vers le bas
                             if instrument == "XAUUSD" and proba_d < 0.55:
-                                feats_dump = ml_filter._features_from_result(r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
+                                feats_dump = ml_filter._features_from_result(r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
                                 # Affiche les features importantes
                                 key_feats = ["score", "quality", "ob_strength", "sweep_strength", "rr",
                                              "atr_at_setup", "atr_ratio_100",
@@ -372,7 +375,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
             continue
 
-        proba = predict_proba(model, features, r, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
+        proba = predict_proba(model, features, r, ob, instrument, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
         diag_ml_probas.append(proba)
         if proba < threshold:
             state.log_rejected(instrument, df_m1.index[ob.validation_index],
@@ -843,7 +846,8 @@ def simulate_last_24h(mt5_exec: MT5Executor):
         cache["obs_htf2"] = detect_order_blocks(df_h1)
 
         mss_setups = detect_mss_setups(df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"])
-        obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
+        # V5.1 (2026-05-20) : virer confirm_ob_with_mss (ML decide via has_mss_nearby)
+        obs_confirmed = obs
 
         # Filtre 24h
         obs_24h = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_24h]
@@ -885,7 +889,7 @@ def simulate_last_24h(mt5_exec: MT5Executor):
                 rejets_24h[reason] = rejets_24h.get(reason, 0) + 1
                 continue
 
-            proba = predict_proba(model, features, r, ob, asset, df_ltf=df_m1, df_d1=df_d1)
+            proba = predict_proba(model, features, r, ob, asset, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
             if proba < threshold:
                 rejets_24h[f"ml_below_{threshold:.2f}"] = rejets_24h.get(f"ml_below_{threshold:.2f}", 0) + 1
                 continue
@@ -894,7 +898,7 @@ def simulate_last_24h(mt5_exec: MT5Executor):
             probas_passed.append(proba)
             kz = killzone_at(df_m1.index[ob.validation_index]) or "?"
             # Sauvegarde aussi les features pour comparaison
-            feats_for_diff = ml_filter._features_from_result(r, ob, asset, df_ltf=df_m1, df_d1=df_d1)
+            feats_for_diff = ml_filter._features_from_result(r, ob, asset, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
             all_trades.append({
                 "asset": asset,
                 "ts": df_m1.index[ob.validation_index],
@@ -1027,7 +1031,8 @@ def debug_last_hour(mt5_exec: MT5Executor):
         cache["obs_htf2"] = detect_order_blocks(df_h1)
 
         mss_setups = detect_mss_setups(df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"])
-        obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
+        # V5.1 (2026-05-20) : virer confirm_ob_with_mss (ML decide via has_mss_nearby)
+        obs_confirmed = obs
 
         # Filtre 24h
         obs_24h_list = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_1h]
@@ -1067,7 +1072,7 @@ def debug_last_hour(mt5_exec: MT5Executor):
             if r.verdict != "TRADE":
                 continue
 
-            proba = predict_proba(model, features, r, ob, asset, df_ltf=df_m1, df_d1=df_d1)
+            proba = predict_proba(model, features, r, ob, asset, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
             if proba < threshold:
                 continue
 
@@ -1142,8 +1147,10 @@ def run_live(test_dry_run: bool = False):
     # User 2026-05-20 : aucun trade au demarrage. Seuls les setups dont validation_ts
     # est >= BOT_START_TS sont pris -> bot attend les setups FRAIS qui se forment
     # apres le boot.
-    BOT_START_TS = pd.Timestamp.now(tz="UTC")
-    log.info(f"BOT_START_TS = {BOT_START_TS} (TOUS les setups anterieurs ignores)")
+    # V5.1 (2026-05-20) : tolerance -1min pour recuperer un OB qui valide
+    # juste avant le demarrage du bot (sinon premiers OBs systematiquement rejetes).
+    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=1)
+    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs ignores, tolerance 1min)")
 
     # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
     try:
