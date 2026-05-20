@@ -530,6 +530,18 @@ def run_live(test_dry_run: bool = False):
                 # V4.1 : seuil ML dynamique selon balance
                 _ml_thr = "0.55 (Sprint)" if balance < 3000 else "0.70 (Conso)"
                 active_assets = get_active_assets(balance)
+
+                # V4.1 FIX 2026-05-20 : cleanup pending orders > 60 min
+                # (Vantage ne supporte pas ORDER_TIME_SPECIFIED -> on cleanup manuellement)
+                from datetime import timezone as _tz
+                _now = pd.Timestamp.now(tz=_tz.utc)
+                _pending_all = mt5_exec.get_pending_orders(magic=BOT_MAGIC)
+                for _po in _pending_all:
+                    age_min = (_now - _po["time_setup"]).total_seconds() / 60
+                    if age_min > 60:
+                        if mt5_exec.cancel_pending_order(_po["ticket"]):
+                            log.info(f"Cleanup pending vieux {_po['symbol']} ticket={_po['ticket']} age={age_min:.0f}min")
+
                 n_open = mt5_exec.get_n_open_positions()
                 # V2 : on compte aussi les pending orders (ils peuvent devenir des positions)
                 n_pending = len(mt5_exec.get_pending_orders(magic=BOT_MAGIC))

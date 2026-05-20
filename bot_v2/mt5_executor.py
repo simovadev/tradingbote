@@ -367,9 +367,9 @@ class MT5Executor:
             else:
                 order_type = mt5.ORDER_TYPE_SELL_STOP
 
-        from datetime import datetime, timedelta, timezone
-        expiration = datetime.now(timezone.utc) + timedelta(minutes=expiration_minutes)
-
+        # FIX 2026-05-20 : Vantage ne supporte pas ORDER_TIME_SPECIFIED
+        # -> on utilise GTC (Good Till Cancelled) sans expiration.
+        # Le bot annule manuellement les pending vieux via cleanup periodique.
         request = {
             "action": mt5.TRADE_ACTION_PENDING,
             "symbol": broker_sym,
@@ -381,8 +381,7 @@ class MT5Executor:
             "deviation": 20,
             "magic": magic,
             "comment": comment,
-            "type_time": mt5.ORDER_TIME_SPECIFIED,
-            "expiration": int(expiration.timestamp()),
+            "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
 
