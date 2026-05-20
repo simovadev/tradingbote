@@ -65,6 +65,7 @@ def detect_order_blocks(
     sweeps: list[Sweep] | None = None,
     swing_strength: int = 2,
     max_group_size: int = 5,
+    min_group_size: int = 2,
     max_bars_after_sweep: int = 10,
     min_sweep_depth_atr: float = 0.0,
 ) -> list[OrderBlock]:
@@ -95,9 +96,9 @@ def detect_order_blocks(
 
     for sweep in sweeps:
         if sweep.direction == "bullish":
-            ob = _try_bullish_ob(df, sweep, max_group_size, max_bars_after_sweep)
+            ob = _try_bullish_ob(df, sweep, max_group_size, max_bars_after_sweep, min_group_size)
         else:
-            ob = _try_bearish_ob(df, sweep, max_group_size, max_bars_after_sweep)
+            ob = _try_bearish_ob(df, sweep, max_group_size, max_bars_after_sweep, min_group_size)
         if ob is not None:
             obs.append(ob)
 
@@ -132,6 +133,7 @@ def _try_bullish_ob(
     sweep: Sweep,
     max_group_size: int,
     max_bars_after_sweep: int,
+    min_group_size: int = 2,
 ) -> OrderBlock | None:
     """Cherche un OB bullish autour d'un sweep bullish (low pris).
 
@@ -175,7 +177,7 @@ def _try_bullish_ob(
         group_start -= 1
 
     group_size = group_end - group_start + 1
-    if group_size < 1 or group_size > max_group_size:
+    if group_size < min_group_size or group_size > max_group_size:
         return None
 
     # 2. Niveaux du groupe (meches incluses)
@@ -218,6 +220,7 @@ def _try_bearish_ob(
     sweep: Sweep,
     max_group_size: int,
     max_bars_after_sweep: int,
+    min_group_size: int = 2,
 ) -> OrderBlock | None:
     """Symetrique : sweep d'un high -> OB bearish (bougies haussieres consecutives)."""
     opens = df["open"].values
@@ -242,7 +245,7 @@ def _try_bearish_ob(
         group_start -= 1
 
     group_size = group_end - group_start + 1
-    if group_size < 1 or group_size > max_group_size:
+    if group_size < min_group_size or group_size > max_group_size:
         return None
 
     ob_high = float(highs[group_start:group_end + 1].max())
