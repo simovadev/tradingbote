@@ -727,8 +727,7 @@ def run_pipeline(
                 continue
 
     swing_strength_ltf = get_param(instrument, "swing_strength_m1", 2)
-    # Iter 6 KEEP : max_group_size 5 -> 2 (OB nets, pas de range)
-    obs = detect_order_blocks(df_ltf, swing_strength=swing_strength_ltf, max_group_size=2)
+    obs = detect_order_blocks(df_ltf, swing_strength=swing_strength_ltf)
 
     # Bible V2 §2 : on charge H1 pour le mecanisme Feu Vert si daily neutre
     df_h1_for_feu_vert: pd.DataFrame | None = None

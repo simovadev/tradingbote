@@ -305,7 +305,7 @@ def _process_instrument(args):
                 continue
 
         swing_strength_ltf = get_param(inst, "swing_strength_m1", 2)
-        obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf, max_group_size=2)
+        obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf)
 
         # Cache pour acceleration
         cache = {
