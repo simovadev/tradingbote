@@ -221,13 +221,31 @@ def evaluate_ob(
         res.confluences.append("phase_reversal")
 
     # ========== 2-quater. DISPLACEMENT DE LA BOUGIE DE VALIDATION (bible §5) ==========
-    min_disp = get_param(instrument, "min_displacement_atr", 0.8)
+    # FIX 2026-05-20 (user) : seuil DYNAMIQUE selon volatilite.
+    # En marche calme : seuil normal (0.7-1.0x ATR).
+    # En marche tres volatile (ATR_14/ATR_100 > 1.5) : on assouplit, car les wicks
+    # gonflent l'ATR et le body relatif est forcement plus petit.
+    min_disp_base = get_param(instrument, "min_displacement_atr", 0.8)
+    # Calcul ratio ATR court/long pour mesurer la volatilite actuelle
+    vol_ratio = 1.0
+    if ob.validation_index >= 100:
+        atr_14 = float((df_ltf.iloc[ob.validation_index-14:ob.validation_index]["high"]
+                        - df_ltf.iloc[ob.validation_index-14:ob.validation_index]["low"]).mean())
+        atr_100 = float((df_ltf.iloc[ob.validation_index-100:ob.validation_index]["high"]
+                        - df_ltf.iloc[ob.validation_index-100:ob.validation_index]["low"]).mean())
+        if atr_100 > 0:
+            vol_ratio = atr_14 / atr_100
+    # Adaptation : si vol_ratio > 1.5 -> on divise le seuil par vol_ratio (max baisse a 0.4)
+    if vol_ratio > 1.5:
+        min_disp = max(0.4, min_disp_base / vol_ratio)
+    else:
+        min_disp = min_disp_base
     has_disp, disp_ratio = has_displacement_at_validation(
         df_ltf, ob.validation_index, ob.direction,
         min_displacement_ratio=min_disp,
     )
     if not has_disp:
-        res.rejection_reason = f"Pas de displacement franc a la validation OB (ratio={disp_ratio:.2f}x ATR)"
+        res.rejection_reason = f"Pas de displacement franc a la validation OB (ratio={disp_ratio:.2f}x ATR, seuil={min_disp:.2f}, vol={vol_ratio:.2f})"
         return res
     res.score += 12
     res.confluences.append(f"displacement={disp_ratio:.1f}xATR")
