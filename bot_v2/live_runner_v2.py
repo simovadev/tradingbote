@@ -99,10 +99,14 @@ RISK_PCT_TEST = 0.02
 BOT_MAGIC = 20260517
 
 # History candles to fetch
-N_BARS_M1 = 2000   # 2000 minutes = ~33h
-N_BARS_M15 = 500
-N_BARS_H1 = 500
-N_BARS_D1 = 100
+# V5.2 (2026-05-20) : aligne sur TRAIN V5 (3 mois + 30j buffer) pour que le live
+# voit la meme chose que le training. Avant : 2000 M1 = 33h -> probas live
+# plafonnees a 0.49 car features (swings HTF, obs HTF, fib_range, parent_ob)
+# calculees sur fenetre 65x plus petite que le training.
+N_BARS_M1 = 130000   # ~90 jours (TRAIN = 3 mois)
+N_BARS_M15 = 8500    # ~90 jours
+N_BARS_H1 = 2200     # ~90 jours
+N_BARS_D1 = 100      # deja OK
 
 
 def get_risk_pct(balance: float) -> float:
