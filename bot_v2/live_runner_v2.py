@@ -257,7 +257,8 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
         # NOUVEAU : pour chaque OB des 15 dernieres minutes (meme ceux hors cutoff),
         # affiche son verdict pipeline+ML pour comprendre pourquoi pas tradé.
         obs_15min = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_15]
-        if obs_15min and instrument == "XAUUSD":  # eviter spam, debug XAUUSD uniquement
+        # Active pour TOUS les actifs qui ont au moins 1 OB dans les 15min
+        if obs_15min:
             loaded_diag = load_model(instrument)
             if loaded_diag is not None:
                 model_d, features_d = loaded_diag
