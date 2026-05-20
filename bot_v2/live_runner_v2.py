@@ -225,12 +225,9 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
     # 3. Filtre : on ne s'interesse qu'aux OB RECENTS
-    # FIX 2026-05-20 (user: "30-40min de retard") : 60 min -> 5 min
-    # Le check age_setup_min > 5 dans execute_setup rejetait deja les vieux setups,
-    # mais le scan les detectait quand meme -> bruit + impression de retard.
-    # Maintenant on les filtre des le scan : setup vu = setup frais (<5min).
+    # User 2026-05-20 : 60 min -> 15 min (compromis entre temps reel et marge MSS)
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=5)
+    recent_cutoff = now - pd.Timedelta(minutes=15)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if not obs_recent:
@@ -298,7 +295,7 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     # === FIX 2026-05-20 : check derive prix + fraicheur setup ===
     # 1. Age du setup : si OB valide y'a >5 min, le marche a probablement bouge trop
     age_setup_min = (pd.Timestamp.now(tz="UTC") - ob.validation_ts).total_seconds() / 60
-    if age_setup_min > 5:
+    if age_setup_min > 15:
         log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
         return False
 
