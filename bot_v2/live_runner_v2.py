@@ -859,12 +859,15 @@ def simulate_last_24h(mt5_exec: MT5Executor):
             n_passed += 1
             probas_passed.append(proba)
             kz = killzone_at(df_m1.index[ob.validation_index]) or "?"
+            # Sauvegarde aussi les features pour comparaison
+            feats_for_diff = ml_filter._features_from_result(r, ob, asset, df_ltf=df_m1, df_d1=df_d1)
             all_trades.append({
                 "asset": asset,
                 "ts": df_m1.index[ob.validation_index],
                 "direction": ob.direction,
                 "proba": proba,
                 "killzone": kz,
+                "features": feats_for_diff if asset == "XAUUSD" else None,
             })
 
         total_setups += n_setups
@@ -888,6 +891,24 @@ def simulate_last_24h(mt5_exec: MT5Executor):
                 f"   {ts} | {t['asset']:<8} | {t['direction']:<8} | "
                 f"kz={t['killzone']:<12} | ML={t['proba']:.3f}"
             )
+
+        # DUMP features pour trades XAUUSD passes - permet comparaison avec OB rejetes live
+        xauusd_trades = [t for t in all_trades if t["asset"] == "XAUUSD" and t.get("features")]
+        if xauusd_trades:
+            log.info("")
+            log.info("=== FEATURES dump XAUUSD trades PASSES (pour comparaison live) ===")
+            key_feats = ["score", "quality", "ob_strength", "sweep_strength", "rr",
+                         "atr_at_setup", "atr_ratio_100",
+                         "dist_to_pdh_pct", "dist_to_pdl_pct", "dist_to_d1_open_pct",
+                         "hour_of_day", "minutes_into_killzone",
+                         "has_FVG_sync", "has_parent_ob", "has_grandparent_ob",
+                         "has_good_zone", "has_session_direction",
+                         "daily_bias_aligned", "kz_ny_am", "kz_london",
+                         "has_smt", "has_feu_vert", "has_breaker_kz", "has_mss_fvg"]
+            for t in xauusd_trades:
+                log.info(f"  TRADE {t['ts'].strftime('%Y-%m-%d %H:%M')} ml={t['proba']:.3f}:")
+                for k in key_feats:
+                    log.info(f"    {k:<25} = {t['features'].get(k, '?')}")
 
 
 def debug_last_hour(mt5_exec: MT5Executor):
