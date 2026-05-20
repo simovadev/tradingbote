@@ -192,7 +192,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     """Scanne un actif : fetch bougies + pipeline Vizion + ML filter.
 
     Args:
-        balance: solde courant (pour seuil ML dynamique : <3K=0.55, >=3K=0.70)
+        balance: solde courant (passe a get_dynamic_threshold, seuil V5 = 0.75 partout)
         debug_diag: log diagnostic complet (bougies, OB, rejections) - 1 fois/5min.
 
     Returns:
@@ -345,8 +345,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     if loaded is None:
         return []
     model, features = loaded
-    # V4.1 (user 2026-05-20) : seuil dynamique selon balance
-    # < 3000E -> 0.55 (sprint, +volume) | >= 3000E -> 0.70 (conso, +qualite)
+    # V5 (user 2026-05-20) : seuil ML = 0.75 partout via ML_THRESHOLDS (WR 76-87%)
     threshold = ml_filter.get_dynamic_threshold(instrument, balance)
 
     valid_setups = []
@@ -1169,8 +1168,8 @@ def run_live(test_dry_run: bool = False):
                 # le capital de calcul. Si LOSS, c'est le cash reel qui est entame.
                 BONUS_EUR = 50.0
                 balance = mt5_exec.get_balance() + BONUS_EUR
-                # V4.1 : seuil ML dynamique selon balance
-                _ml_thr = "0.55 (Sprint)" if balance < 3000 else "0.70 (Conso)"
+                # V5 : seuil ML unifie 0.75 partout
+                _ml_thr = "0.75 (V5)"
                 active_assets = get_active_assets(balance)
 
                 # Cleanup pending orders > 30 min (= max_bars_to_fill backtest)
