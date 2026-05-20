@@ -254,18 +254,12 @@ def predict_proba(r, ob, instrument: str) -> float:
 
 
 def get_dynamic_threshold(instrument: str, balance: float | None = None) -> float:
-    """Seuil dynamique selon le compte (user 2026-05-20 strategie sprint+conso).
+    """Seuil ML (user 2026-05-20 : revert au seuil 0.70 fixe apres test).
 
-    Phase Sprint (compte <3000E)    : seuil 0.55 -> +volume, +cycles compound
-    Phase Conso  (compte >=3000E)   : seuil 0.70 -> +qualite, +safe
-
-    Si balance=None : fallback sur le seuil statique ML_THRESHOLDS (0.70 V4).
+    Strategie 0.55 sprint / 0.70 conso revertee : on garde 0.70 partout
+    pour qualite maximale (WR 73-80% sur OOS).
     """
-    if balance is None:
-        return ML_THRESHOLDS.get(instrument, DEFAULT_THRESHOLD)
-    if balance < 3000:
-        return 0.55  # Sprint
-    return 0.70  # Consolidation
+    return ML_THRESHOLDS.get(instrument, DEFAULT_THRESHOLD)
 
 
 def should_take(r, ob, instrument: str, balance: float | None = None) -> tuple[bool, float]:
