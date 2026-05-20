@@ -54,10 +54,14 @@ RISK_PCT = 0.01
 BALANCE = 154.96
 
 # Fenetre live (memes valeurs que live_runner_v2)
-N_BARS_M1 = 2000   # ~33h
-N_BARS_M15 = 500
-N_BARS_H1 = 500
-N_BARS_D1 = 100
+# TEST DIAG 2026-05-20 : augmente a ~3 mois pour matcher le training V5
+N_BARS_M1 = int(os.environ.get("N_BARS_M1", "2000"))   # 2000=33h | 120000=~3 mois
+N_BARS_M15 = int(os.environ.get("N_BARS_M15", "500"))
+N_BARS_H1 = int(os.environ.get("N_BARS_H1", "500"))
+N_BARS_D1 = int(os.environ.get("N_BARS_D1", "100"))
+
+# Limite periode test (derniers N jours seulement) - 0 = tout
+DEFAULT_LAST_DAYS = 14
 
 
 def load_vantage(asset, tf):
@@ -81,9 +85,9 @@ def load_model_v5(asset):
     return model, features
 
 
-def backtest_one(asset):
+def backtest_one(asset, last_days=DEFAULT_LAST_DAYS):
     print(f"\n{'='*70}", flush=True)
-    print(f"BACKTEST V5 FAST (live-like) : {asset}", flush=True)
+    print(f"BACKTEST V5 FAST (live-like) : {asset}  [{last_days} derniers jours]", flush=True)
     print(f"{'='*70}", flush=True)
 
     df_m1_full = load_vantage(asset, "M1")
@@ -99,8 +103,10 @@ def backtest_one(asset):
     if df_d1_full is None:
         df_d1_full = build_d1_from_h1(df_h1_full)
 
-    period_days = (df_m1_full.index[-1] - df_m1_full.index[0]).days
-    print(f"  M1   : {len(df_m1_full):,} bougies | {df_m1_full.index[0].date()} -> {df_m1_full.index[-1].date()} ({period_days}j)", flush=True)
+    # Cutoff : derniers N jours
+    cutoff_ts = df_m1_full.index[-1] - pd.Timedelta(days=last_days) if last_days > 0 else df_m1_full.index[0]
+    period_days = (df_m1_full.index[-1] - max(cutoff_ts, df_m1_full.index[0])).days
+    print(f"  M1   : {len(df_m1_full):,} bougies total | test: {cutoff_ts.date()} -> {df_m1_full.index[-1].date()} ({period_days}j)", flush=True)
 
     model, features = load_model_v5(asset)
     if model is None:
@@ -119,11 +125,14 @@ def backtest_one(asset):
     sws = get_param(asset, "swing_strength_m1", 2)
     t0 = time.time()
     obs_all = detect_order_blocks(df_m1_full, swing_strength=sws, max_group_size=2)
-    print(f"  OBs detectes (tout) : {len(obs_all):,} (en {time.time()-t0:.1f}s)", flush=True)
+    # Filtre OBs sur la fenetre test seulement
+    obs_all = [ob for ob in obs_all if df_m1_full.index[ob.validation_index] >= cutoff_ts]
+    print(f"  OBs detectes ({last_days}j) : {len(obs_all):,} (en {time.time()-t0:.1f}s)", flush=True)
 
     # Pour chaque OB : on construit une "vue live" = les 2000 M1 + 500 M15 + 500 H1 jusqu'au OB
     trades = []
     rejets = {}
+    all_probas = []  # toutes les probas calculees
     skip_start = 2000  # on ignore les premiers OBs (pas assez d'historique)
     t0 = time.time()
     last_log = t0
@@ -210,6 +219,9 @@ def backtest_one(asset):
         X = pd.DataFrame([[feats.get(f, 0) for f in features]], columns=features)
         proba = float(model.predict_proba(X)[0, 1])
 
+        # Track distribution probas
+        all_probas.append(proba)
+
         if proba < ML_THRESHOLD:
             rejets[f"ml<{ML_THRESHOLD}"] = rejets.get(f"ml<{ML_THRESHOLD}", 0) + 1
             continue
@@ -247,7 +259,21 @@ def backtest_one(asset):
     # Stats
     df_trades = pd.DataFrame(trades)
     if len(df_trades) == 0:
-        print(f"\n  AUCUN trade pris", flush=True)
+        print(f"\n  AUCUN trade pris au seuil {ML_THRESHOLD}", flush=True)
+        # Diagnostic : top rejets + distribution probas
+        sorted_rej = sorted(rejets.items(), key=lambda x: -x[1])
+        print(f"\n  Top 10 rejets (OBs analyses = {len(obs_all)}):", flush=True)
+        for reason, count in sorted_rej[:10]:
+            print(f"    {count:>5}x : {reason}", flush=True)
+
+        if all_probas:
+            import numpy as _np
+            probas = _np.array(all_probas)
+            print(f"\n  Distribution probas ({len(probas)} OBs ont atteint le ML) :", flush=True)
+            print(f"    min={probas.min():.3f} max={probas.max():.3f} mean={probas.mean():.3f} median={_np.median(probas):.3f}", flush=True)
+            for thr in [0.3, 0.5, 0.6, 0.65, 0.70, 0.75, 0.80]:
+                n_above = (probas >= thr).sum()
+                print(f"    proba >= {thr:.2f} : {n_above} OBs ({n_above/len(probas)*100:.1f}%)", flush=True)
         return {"asset": asset, "trades": 0, "wr": 0, "pnl": 0}
 
     closed = df_trades[df_trades["outcome"].isin(["WIN", "LOSS"])]
@@ -283,6 +309,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("asset", nargs="?")
     p.add_argument("--all", action="store_true")
+    p.add_argument("--days", type=int, default=DEFAULT_LAST_DAYS, help="Test last N days (default: 14)")
     args = p.parse_args()
 
     assets = ALL_ASSETS if (args.all or args.asset == "--all") else [args.asset]
@@ -297,7 +324,7 @@ def main():
             print(f"!! Actif inconnu : {a}", flush=True)
             continue
         try:
-            r = backtest_one(a)
+            r = backtest_one(a, last_days=args.days)
             if r:
                 results.append(r)
         except Exception as e:
