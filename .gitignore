@@ -12,6 +12,9 @@ ENV/
 # Data (gros fichiers, on re-fetch depuis Vantage en live)
 data/
 *.parquet
+# Exception : data_vantage trackee (utilisee par DataBuffer du bot live)
+!data_vantage/
+!data_vantage/*.parquet
 
 # Logs
 *.log
