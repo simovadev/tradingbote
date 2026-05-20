@@ -193,51 +193,123 @@ def predict_proba_for_tf(r, ob, instrument: str, tf: str = "M1") -> float | None
     return float(model.predict_proba(X)[0, 1])
 
 
-def _features_from_result(r, ob, instrument: str) -> dict:
-    """Reproduit les features du dataset ML a partir d'un PipelineResult Vizion.
+def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None) -> dict:
+    """Reproduit EXACTEMENT les features V3.5 du dataset ML (ml_dataset.py _extract_features).
 
-    Doit rester synchronise avec _extract_features dans ml_dataset.py.
+    FIX CRITIQUE 2026-05-20 : avant, 11 features etaient absentes en live (atr, dist_pdh,
+    hour_of_day, etc.) -> le ML recevait 0 et donnait des probas catastrophiques (0.04-0.26).
+    Maintenant aligne sur le training V3.5.
     """
     setup = r.trade_setup
     conf = r.confluences or []
     conf_text = " ".join(conf)
-    return {
+
+    f = {
+        # Scores Vizion
         "score": r.score,
         "quality": r.quality.total_quality_score if r.quality else 0,
         "ob_strength": r.quality.ob_strength if r.quality else 0,
         "sweep_strength": r.quality.sweep_strength if r.quality else 0,
         "retest_count": r.quality.retest_count if r.quality else 0,
         "is_unicorn": int(r.quality.is_unicorn) if r.quality else 0,
-        "multi_liq_sweep": int(r.quality.multi_liquidity_sweep) if r.quality else 0,
+        # Trade setup
         "rr": setup.rr if setup else 0,
         "risk_points": setup.risk_points if setup else 0,
         "tp_source_htf": int("htf" in (setup.tp_source if setup else "")),
         "tp_source_capped": int("capped" in (setup.tp_source if setup else "")),
+        # Daily bias
         "daily_bias_aligned": int(r.daily_bias_ok is True),
         "daily_bias_neutral": int(r.daily_bias is not None and r.daily_bias.bias == "neutral"),
+        # Killzone one-hot
         "kz_london": int(r.killzone_name == "London"),
         "kz_ny_am": int(r.killzone_name == "NY_AM"),
         "kz_ny_pm": int(r.killzone_name == "NY_PM"),
         "kz_asia": int(r.killzone_name == "Asia"),
         "kz_ny_lunch": int(r.killzone_name == "NY_Lunch"),
-        "kz_none": int(r.killzone_name is None),
-        "has_sync_fvg": int("OB_FVG_sync" in conf_text),
+        # Confluences
         "has_smt": int("smt_" in conf_text),
         "has_feu_vert": int("feu_vert" in conf_text),
         "has_breaker_kz": int("breaker_in_KZ" in conf_text),
         "has_mss_fvg": int("MSS_with_FVG" in conf_text),
-        "has_grandparent": int("grandparent_ob_" in conf_text),
         "has_po3_dist": int("po3_distribution" in conf_text),
         "has_phase_expansion": int("phase_expansion" in conf_text),
-        "has_phase_reversal": int("phase_reversal" in conf_text),
         "has_open_midnight_respect": int("respecte_OpenMidnightNY" in conf_text),
+        # V3.5 : indicateurs des filtres relaches
+        "has_FVG_sync": int("OB_FVG_sync" in conf_text),
+        "has_parent_ob": int("parent_ob_" in conf_text and "no_parent_ob_" not in conf_text),
+        "has_grandparent_ob": int("grandparent_ob_" in conf_text and "no_grandparent" not in conf_text),
+        "has_good_zone": int("mauvaise_zone" not in conf_text and "zone=" in conf_text),
+        "has_session_direction": int("session_sans_direction" not in conf_text),
+        # OB structure
         "ob_group_size": ob.group_size,
         "bars_sweep_to_validation": ob.validation_index - getattr(ob.sweep, "sweep_index", ob.group_start_index),
         "bars_group_to_validation": ob.validation_index - ob.group_start_index,
         "is_bullish": int(ob.direction == "bullish"),
-        "is_mss_setup": int(getattr(ob, "is_mss_setup", False)),
-        "has_mss_confirmation": 1,
     }
+
+    # Features V3 (temps)
+    ts = ob.validation_ts
+    f["hour_of_day"] = int(ts.hour)
+    f["day_of_week"] = int(ts.dayofweek)
+    f["minutes_into_killzone"] = int(ts.hour * 60 + ts.minute) % 60 if r.killzone_name else -1
+
+    # Features V3 (volatilite ATR)
+    if df_ltf is not None and ob.validation_index is not None and ob.validation_index >= 14:
+        idx = ob.validation_index
+        period_14 = 14
+        period_100 = 100
+        # ATR 14
+        sl14 = df_ltf.iloc[max(0, idx - period_14):idx]
+        if len(sl14) > 0:
+            hl = sl14["high"] - sl14["low"]
+            hc = (sl14["high"] - sl14["close"].shift(1)).abs()
+            lc = (sl14["low"] - sl14["close"].shift(1)).abs()
+            import pandas as _pd
+            tr = _pd.concat([hl, hc, lc], axis=1).max(axis=1)
+            atr14 = float(tr.mean()) if len(tr) > 0 else 0.0
+        else:
+            atr14 = 0.0
+        # ATR 100
+        sl100 = df_ltf.iloc[max(0, idx - period_100):idx]
+        if len(sl100) > 0:
+            hl = sl100["high"] - sl100["low"]
+            hc = (sl100["high"] - sl100["close"].shift(1)).abs()
+            lc = (sl100["low"] - sl100["close"].shift(1)).abs()
+            import pandas as _pd
+            tr = _pd.concat([hl, hc, lc], axis=1).max(axis=1)
+            atr100 = float(tr.mean()) if len(tr) > 0 else 0.0
+        else:
+            atr100 = 0.0
+        f["atr_at_setup"] = atr14
+        f["atr_ratio_100"] = (atr14 / atr100) if atr100 > 0 else 1.0
+    else:
+        f["atr_at_setup"] = 0.0
+        f["atr_ratio_100"] = 1.0
+
+    # Features V3 (distance daily levels)
+    entry_price = setup.entry_price if setup else (ob.ob_low + ob.ob_high) / 2
+    pdh = pdl = d1_open = None
+    if df_d1 is not None and len(df_d1) > 0:
+        past = df_d1[df_d1.index < ts]
+        if len(past) >= 2:
+            yesterday = past.iloc[-1]
+            pdh = float(yesterday["high"])
+            pdl = float(yesterday["low"])
+            d1_open = float(yesterday["close"])  # today open ~= prev close
+    if pdh and entry_price:
+        f["dist_to_pdh_pct"] = abs(entry_price - pdh) / pdh * 100
+    else:
+        f["dist_to_pdh_pct"] = 0.0
+    if pdl and entry_price:
+        f["dist_to_pdl_pct"] = abs(entry_price - pdl) / pdl * 100
+    else:
+        f["dist_to_pdl_pct"] = 0.0
+    if d1_open and entry_price:
+        f["dist_to_d1_open_pct"] = (entry_price - d1_open) / d1_open * 100
+    else:
+        f["dist_to_d1_open_pct"] = 0.0
+
+    return f
 
 
 def predict_proba(r, ob, instrument: str) -> float:

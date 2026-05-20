@@ -144,8 +144,9 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     return model, features
 
 
-def predict_proba(model, features, r, ob, instrument) -> float:
-    feats = ml_filter._features_from_result(r, ob, instrument)
+def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None) -> float:
+    # FIX 2026-05-20 : passer df_ltf + df_d1 pour les features ATR + distance daily levels
+    feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1)
     X = pd.DataFrame([[feats.get(f, 0) for f in features]], columns=features)
     return float(model.predict_proba(X)[0, 1])
 
@@ -277,7 +278,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                             cache=cache,
                         )
                         if r_d.verdict == "TRADE" and r_d.trade_setup is not None:
-                            proba_d = predict_proba(model_d, features_d, r_d, ob, instrument)
+                            proba_d = predict_proba(model_d, features_d, r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
                             verdict_d = f"TRADE ml={proba_d:.3f} {'OK' if proba_d >= thr_d else f'<{thr_d}'}"
                         else:
                             verdict_d = f"REJET: {(r_d.rejection_reason or 'no_trade')[:40]}"
@@ -323,7 +324,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
             continue
 
-        proba = predict_proba(model, features, r, ob, instrument)
+        proba = predict_proba(model, features, r, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
         diag_ml_probas.append(proba)
         if proba < threshold:
             state.log_rejected(instrument, df_m1.index[ob.validation_index],
@@ -836,7 +837,7 @@ def simulate_last_24h(mt5_exec: MT5Executor):
                 rejets_24h[reason] = rejets_24h.get(reason, 0) + 1
                 continue
 
-            proba = predict_proba(model, features, r, ob, asset)
+            proba = predict_proba(model, features, r, ob, asset, df_ltf=df_m1, df_d1=df_d1)
             if proba < threshold:
                 rejets_24h[f"ml_below_{threshold:.2f}"] = rejets_24h.get(f"ml_below_{threshold:.2f}", 0) + 1
                 continue
@@ -997,7 +998,7 @@ def debug_last_hour(mt5_exec: MT5Executor):
             if r.verdict != "TRADE":
                 continue
 
-            proba = predict_proba(model, features, r, ob, asset)
+            proba = predict_proba(model, features, r, ob, asset, df_ltf=df_m1, df_d1=df_d1)
             if proba < threshold:
                 continue
 
