@@ -78,7 +78,7 @@ TEST_MODE_ASSETS = ["XAUUSD", "EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "USDCAD", 
 TEST_MODE_THRESHOLD = 50.0  # Balance < 50€ = mode test
 
 # Scan interval (user 2026-05-18 : 30s -> 15s pour plus de reactivite)
-SCAN_INTERVAL_SEC = 15
+SCAN_INTERVAL_SEC = 5  # FIX 2026-05-20 : 15 -> 5 sec pour temps reel
 
 # Cooldown par actif
 COOLDOWN_SEC = 15 * 60
@@ -166,10 +166,17 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     if df_m1 is None or len(df_m1) < 200:
         return []
 
+    # FIX 2026-05-20 : virer la DERNIERE bougie M1 (souvent en cours, pas close)
+    # Sinon le bot detecte des OB sur bougie incomplete -> setup change a chaque tick
+    df_m1 = df_m1.iloc[:-1]
+
     df_m15 = mt5_exec.get_bars(instrument, "M15", N_BARS_M15)
     df_h1 = mt5_exec.get_bars(instrument, "H1", N_BARS_H1)
     if df_m15 is None or df_h1 is None:
         return []
+    # FIX : pareil pour M15 et H1 (bougie courante en formation)
+    df_m15 = df_m15.iloc[:-1]
+    df_h1 = df_h1.iloc[:-1]
 
     # D1 : build depuis H1 (pas toujours dispo natif chez les brokers)
     try:
@@ -286,13 +293,38 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     ob = setup_dict["ob"]
     setup = r.trade_setup
 
+    # === FIX 2026-05-20 : check derive prix + fraicheur setup ===
+    # 1. Age du setup : si OB valide y'a >5 min, le marche a probablement bouge trop
+    age_setup_min = (pd.Timestamp.now(tz="UTC") - ob.validation_ts).total_seconds() / 60
+    if age_setup_min > 5:
+        log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
+        return False
+
+    # 2. Derive prix : verifie que entry n'est pas trop loin du prix actuel (max 0.3%)
+    info = mt5_exec.symbol_info(instrument)
+    if info is None:
+        log.error(f"Symbol info None pour {instrument}")
+        return False
+    tick = mt5_exec.get_tick(instrument)
+    if tick is None or tick.bid <= 0:
+        log.error(f"Tick None pour {instrument}")
+        return False
+    current_price = (tick.bid + tick.ask) / 2
+    entry_setup = float(setup.entry_price)
+    derive_pct = abs(current_price - entry_setup) / current_price * 100
+    sl_distance_pct = abs(setup.entry_price - setup.stop_loss) / current_price * 100
+    # Reject si derive > 30% de la SL distance (sinon ratio risk/reward casse)
+    if derive_pct > sl_distance_pct * 0.30:
+        log.warning(
+            f"DERIVE PRIX TROP GRANDE {instrument} : "
+            f"entry={entry_setup:.5f} now={current_price:.5f} "
+            f"derive={derive_pct:.2f}% > 30%*SL({sl_distance_pct:.2f}%), SKIP"
+        )
+        return False
+
     # Calcul lots selon balance (utilise les VRAIES valeurs MT5 du broker)
     risk_pct = get_risk_pct(balance)
     try:
-        info = mt5_exec.symbol_info(instrument)
-        if info is None:
-            log.error(f"Symbol info None pour {instrument}")
-            return False
 
         # Distance SL/TP en unites de prix (depuis l'OB)
         sl_distance = abs(setup.entry_price - setup.stop_loss)
@@ -531,14 +563,15 @@ def run_live(test_dry_run: bool = False):
                 _ml_thr = "0.55 (Sprint)" if balance < 3000 else "0.70 (Conso)"
                 active_assets = get_active_assets(balance)
 
-                # V4.1 FIX 2026-05-20 : cleanup pending orders > 60 min
+                # V4.1 FIX 2026-05-20 : cleanup pending orders > 15 min
                 # (Vantage ne supporte pas ORDER_TIME_SPECIFIED -> on cleanup manuellement)
+                # 15 min car au-dela le marche a trop bouge pour que l'OB reste pertinent
                 from datetime import timezone as _tz
                 _now = pd.Timestamp.now(tz=_tz.utc)
                 _pending_all = mt5_exec.get_pending_orders(magic=BOT_MAGIC)
                 for _po in _pending_all:
                     age_min = (_now - _po["time_setup"]).total_seconds() / 60
-                    if age_min > 60:
+                    if age_min > 15:
                         if mt5_exec.cancel_pending_order(_po["ticket"]):
                             log.info(f"Cleanup pending vieux {_po['symbol']} ticket={_po['ticket']} age={age_min:.0f}min")
 
@@ -559,6 +592,10 @@ def run_live(test_dry_run: bool = False):
 
                 # Scan tous les actifs actifs
                 now = pd.Timestamp.now(tz="UTC")
+                # FIX 2026-05-20 : dedup setups par validation_ts pour eviter reprises
+                if not hasattr(state, "_seen_setups"):
+                    state._seen_setups = {}
+
                 for asset in active_assets:
                     # Cooldown
                     if state.is_in_cooldown(asset, now, COOLDOWN_SEC):
@@ -570,6 +607,22 @@ def run_live(test_dry_run: bool = False):
 
                     # Garde le plus recent (le dernier valide)
                     setup = setups[-1]
+                    setup_key = (asset, str(setup['ts']))
+
+                    # FIX : skip si deja vu il y a moins de 30 min
+                    if setup_key in state._seen_setups:
+                        last_seen = state._seen_setups[setup_key]
+                        if (now - last_seen).total_seconds() < 1800:  # 30 min
+                            log.debug(f"SKIP setup deja vu {asset} ts={setup['ts']}")
+                            continue
+                    state._seen_setups[setup_key] = now
+
+                    # Cleanup vieilles entrees (> 2h)
+                    state._seen_setups = {
+                        k: v for k, v in state._seen_setups.items()
+                        if (now - v).total_seconds() < 7200
+                    }
+
                     log.info(
                         f"SETUP {asset} {setup['ob'].direction} "
                         f"ts={setup['ts']} ML={setup['proba']:.3f} score={setup['r'].score}"

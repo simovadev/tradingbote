@@ -218,6 +218,10 @@ class MT5Executor:
             return float(tick.ask)
         return float(tick.bid)
 
+    def get_tick(self, symbol: str):
+        """Retourne le tick complet (bid, ask, last, etc.) pour temps reel."""
+        return mt5.symbol_info_tick(to_broker_symbol(symbol))
+
     # ========== POSITIONS ==========
 
     def get_positions(self, symbol: str | None = None) -> list[dict]:
