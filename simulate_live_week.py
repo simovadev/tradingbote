@@ -45,8 +45,10 @@ from bot_v2 import ml_filter
 
 
 ML_THRESHOLD = 0.75
-BALANCE = 154.96
-RISK_PCT = 0.01
+# IDENTIQUE au training V5 (ml_dataset.py:403 -> balance=60, risk_pct=0.10)
+# Permet de comparer PnL apple-to-apple avec check_week_all_assets.py
+BALANCE = 60.0
+RISK_PCT = 0.10
 # Fenetre = identique au training V5 (chunks 14j + 30j buffer = 44j)
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "44"))
 
