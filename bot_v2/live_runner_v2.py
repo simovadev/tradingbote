@@ -228,9 +228,11 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
     # 3. Filtre : on ne s'interesse qu'aux OB RECENTS
-    # User 2026-05-20 : 60 min -> 15 min (compromis entre temps reel et marge MSS)
+    # FIX 2026-05-20 : retour a 60 min (15 min etait trop restrictif).
+    # User a vu OB_60min=5 sur XAUUSD mais OB_15min=1 -> le bot ratait 4 setups sur 5.
+    # BOT_START_TS empeche deja de re-placer des vieux setups au restart.
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=15)
+    recent_cutoff = now - pd.Timedelta(minutes=60)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
@@ -331,7 +333,7 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     # === FIX 2026-05-20 : check derive prix + fraicheur setup ===
     # 1. Age du setup : si OB valide y'a >5 min, le marche a probablement bouge trop
     age_setup_min = (pd.Timestamp.now(tz="UTC") - ob.validation_ts).total_seconds() / 60
-    if age_setup_min > 15:
+    if age_setup_min > 60:
         log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
         return False
 
@@ -806,47 +808,51 @@ def run_live(test_dry_run: bool = False):
                     if not setups:
                         continue
 
-                    # Garde le plus recent (le dernier valide)
-                    setup = setups[-1]
-
-                    # FIX 2026-05-20 : ignore les setups valides AVANT le demarrage du bot
-                    # (sinon au restart le bot re-place des LIMIT sur de vieux OB)
-                    if setup['ts'] < BOT_START_TS:
-                        log.debug(f"SKIP setup pre-start {asset} ts={setup['ts']} < {BOT_START_TS}")
-                        continue
-
-                    setup_key = (asset, str(setup['ts']))
-
-                    # FIX : skip si deja vu il y a moins de 30 min
-                    if setup_key in state._seen_setups:
-                        last_seen = state._seen_setups[setup_key]
-                        if (now - last_seen).total_seconds() < 1800:  # 30 min
-                            log.debug(f"SKIP setup deja vu {asset} ts={setup['ts']}")
+                    # FIX 2026-05-20 : itere sur TOUS les setups valides (pas juste le dernier)
+                    # Avant : setup=setups[-1] -> on ratait 4/5 setups quand recent_cutoff=60min
+                    # On trie du plus recent au plus vieux pour traiter les frais d'abord.
+                    setups_sorted = sorted(setups, key=lambda s: s['ts'], reverse=True)
+                    for setup in setups_sorted:
+                        # Ignore les setups valides AVANT le demarrage du bot
+                        if setup['ts'] < BOT_START_TS:
+                            log.debug(f"SKIP setup pre-start {asset} ts={setup['ts']} < {BOT_START_TS}")
                             continue
-                    state._seen_setups[setup_key] = now
+
+                        setup_key = (asset, str(setup['ts']))
+
+                        # Skip si deja vu il y a moins de 30 min
+                        if setup_key in state._seen_setups:
+                            last_seen = state._seen_setups[setup_key]
+                            if (now - last_seen).total_seconds() < 1800:  # 30 min
+                                log.debug(f"SKIP setup deja vu {asset} ts={setup['ts']}")
+                                continue
+                        state._seen_setups[setup_key] = now
+
+                        log.info(
+                            f"SETUP {asset} {setup['ob'].direction} "
+                            f"ts={setup['ts']} ML={setup['proba']:.3f} score={setup['r'].score}"
+                        )
+
+                        if test_dry_run:
+                            log.info(f"  [DRY RUN] order non place")
+                            continue
+
+                        # Re-check concurrent (peut avoir change entre temps)
+                        n_open_now = mt5_exec.get_n_open_positions()
+                        n_pending_now = len(mt5_exec.get_pending_orders(magic=BOT_MAGIC))
+                        if n_open_now + n_pending_now >= MAX_CONCURRENT:
+                            break
+
+                        execute_setup(mt5_exec, state, setup, balance)
+                        # Une fois un setup execute pour cet actif, on passe au suivant
+                        # (cooldown 15min va bloquer les autres setups du meme actif)
+                        break
 
                     # Cleanup vieilles entrees (> 2h)
                     state._seen_setups = {
                         k: v for k, v in state._seen_setups.items()
                         if (now - v).total_seconds() < 7200
                     }
-
-                    log.info(
-                        f"SETUP {asset} {setup['ob'].direction} "
-                        f"ts={setup['ts']} ML={setup['proba']:.3f} score={setup['r'].score}"
-                    )
-
-                    if test_dry_run:
-                        log.info(f"  [DRY RUN] order non place")
-                        continue
-
-                    # Re-check concurrent (peut avoir change entre temps)
-                    n_open_now = mt5_exec.get_n_open_positions()
-                    n_pending_now = len(mt5_exec.get_pending_orders(magic=BOT_MAGIC))
-                    if n_open_now + n_pending_now >= MAX_CONCURRENT:
-                        break
-
-                    execute_setup(mt5_exec, state, setup, balance)
 
                 # Stats periodiques (chaque ~5 min)
                 if int(time.time()) % 300 < SCAN_INTERVAL_SEC:
