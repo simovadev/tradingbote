@@ -550,6 +550,13 @@ def run_live(test_dry_run: bool = False):
     if test_dry_run:
         log.info("** MODE DRY RUN - aucun ordre ne sera place **")
 
+    # FIX 2026-05-20 (user: "lorsque je redemarrer le bot ca placer des order limite") :
+    # On marque le timestamp de demarrage. Au scan, on IGNORE tout OB dont la validation
+    # est anterieure a BOT_START_TS -> evite de re-placer des LIMIT sur des setups
+    # deja passes (ou deja tradés avant restart).
+    BOT_START_TS = pd.Timestamp.now(tz="UTC")
+    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs ignores)")
+
     try:
         while True:
             try:
@@ -606,6 +613,13 @@ def run_live(test_dry_run: bool = False):
 
                     # Garde le plus recent (le dernier valide)
                     setup = setups[-1]
+
+                    # FIX 2026-05-20 : ignore les setups valides AVANT le demarrage du bot
+                    # (sinon au restart le bot re-place des LIMIT sur de vieux OB)
+                    if setup['ts'] < BOT_START_TS:
+                        log.debug(f"SKIP setup pre-start {asset} ts={setup['ts']} < {BOT_START_TS}")
+                        continue
+
                     setup_key = (asset, str(setup['ts']))
 
                     # FIX : skip si deja vu il y a moins de 30 min
