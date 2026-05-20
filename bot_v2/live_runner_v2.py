@@ -681,6 +681,9 @@ def boot_diagnostics(mt5_exec: MT5Executor, state: LiveState):
     log.info("=" * 70)
     simulate_last_24h(mt5_exec)
 
+    # === 7. DEBUG DETAILLE DERNIERE HEURE (chaque OB analyse) ===
+    debug_last_hour(mt5_exec)
+
     log.info("=" * 70)
     log.info("FIN BOOT DIAGNOSTICS")
     log.info("=" * 70)
@@ -839,6 +842,159 @@ def simulate_last_24h(mt5_exec: MT5Executor):
                 f"   {ts} | {t['asset']:<8} | {t['direction']:<8} | "
                 f"kz={t['killzone']:<12} | ML={t['proba']:.3f}"
             )
+
+
+def debug_last_hour(mt5_exec: MT5Executor):
+    """DEBUG ULTRA DETAILLE de la derniere heure pour chaque actif.
+
+    Pour CHAQUE OB+MSS de la derniere heure, affiche :
+    - Timestamp validation, killzone, age en min
+    - Verdict pipeline (TRADE / REJECTED + raison)
+    - Si TRADE : proba ML + serait-il pris par le live ?
+    - Pourquoi le live l'aurait skip (recent_cutoff, BOT_START_TS, etc.)
+    """
+    from bot_v2.concepts.killzones import killzone_at
+    from bot_v2.concepts.order_block import detect_order_blocks
+    from bot_v2.concepts.mss_setup import detect_mss_setups, confirm_ob_with_mss
+    from bot_v2.concepts.liquidity import find_swings
+    from bot_v2.concepts.structure import detect_structure_breaks, detect_trend
+    from bot_v2.concepts.fvg import detect_fvg
+    from bot_v2.concepts.breaker import detect_breakers
+
+    log.info("=" * 90)
+    log.info("DEBUG DERNIERE HEURE - chaque OB analyse en detail")
+    log.info("=" * 90)
+
+    utc_now = pd.Timestamp.now(tz="UTC")
+    cutoff_1h = utc_now - pd.Timedelta(hours=1)
+
+    grand_total_obs = 0
+    grand_total_would_trade = 0
+
+    for asset in LIVE_ASSETS:
+        df_m1 = mt5_exec.get_bars(asset, "M1", 500, force_sync=True)
+        if df_m1 is None or len(df_m1) < 200:
+            continue
+        df_m1 = df_m1.iloc[:-1]
+
+        df_m15 = mt5_exec.get_bars(asset, "M15", 500)
+        df_h1 = mt5_exec.get_bars(asset, "H1", 500)
+        if df_m15 is None or df_h1 is None:
+            continue
+        df_m15 = df_m15.iloc[:-1]
+        df_h1 = df_h1.iloc[:-1]
+
+        try:
+            df_d1 = mt5_exec.get_bars(asset, "D1", 100)
+            if df_d1 is None or len(df_d1) < 10:
+                df_d1 = build_d1_from_h1(df_h1)
+        except Exception:
+            df_d1 = build_d1_from_h1(df_h1)
+
+        htf_dfs = {"H1": df_h1, "D1": df_d1}
+        try:
+            df_h4 = mt5_exec.get_bars(asset, "H4", 500)
+            if df_h4 is not None:
+                htf_dfs["H4"] = df_h4
+        except Exception:
+            pass
+        htf_swings = collect_htf_swings(htf_dfs, swing_strength=3)
+
+        correlated_dfs = {}
+        for corr_name, corr_type in SMT_PAIRS.get(asset, []):
+            try:
+                df_c = mt5_exec.get_bars(corr_name, "M1", 500)
+                if df_c is not None and len(df_c) > 0:
+                    correlated_dfs[corr_name] = (df_c, corr_type)
+            except Exception:
+                continue
+
+        sws = get_param(asset, "swing_strength_m1", 2)
+        obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+        cache = {
+            "swings_ltf": find_swings(df_m1, strength=sws),
+            "fvgs_ltf": detect_fvg(df_m1),
+            "breakers_ltf": detect_breakers(df_m1),
+            "obs_htf": detect_order_blocks(df_m15),
+        }
+        cache["structure_breaks"] = detect_structure_breaks(df_m1, swings=cache["swings_ltf"])
+        cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
+        cache["obs_htf2"] = detect_order_blocks(df_h1)
+
+        mss_setups = detect_mss_setups(df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"])
+        obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
+
+        # Filtre derniere heure
+        obs_1h = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_1h]
+        if not obs_1h:
+            continue
+
+        loaded = load_model(asset)
+        if loaded is None:
+            continue
+        model, features = loaded
+        threshold = ml_filter.get_dynamic_threshold(asset, 150.0)
+
+        log.info("")
+        log.info(f"=== {asset} === {len(obs_1h)} OB+MSS dans la derniere heure ===")
+        log.info(f"{'TS':<19}{'DIR':<9}{'AGE_MIN':<9}{'KZ':<13}{'VERDICT':<35}{'ML':<8}{'LIVE_TAKE':<10}")
+        log.info("-" * 100)
+
+        for ob in obs_1h:
+            ts = df_m1.index[ob.validation_index]
+            age_min = (utc_now - ts).total_seconds() / 60
+            kz = killzone_at(ts) or "AUCUNE"
+            grand_total_obs += 1
+
+            try:
+                r = evaluate_ob(
+                    ob, df_m1, df_m15, df_d1, asset,
+                    ltf_name="M1", htf_name="M15",
+                    df_htf2=df_h1, htf2_name="H1",
+                    correlated_dfs=correlated_dfs,
+                    htf_swings=htf_swings,
+                    df_h1=df_h1, min_score=0, min_quality=0,
+                    cache=cache,
+                )
+            except Exception as e:
+                log.info(f"{ts.strftime('%Y-%m-%d %H:%M'):<19}{ob.direction[:7]:<9}{age_min:<9.1f}{kz:<13}{'EXCEPTION: ' + str(e)[:25]:<35}{'-':<8}{'NON':<10}")
+                continue
+
+            if r.verdict != "TRADE":
+                reason = (r.rejection_reason or "no_trade")[:33]
+                log.info(f"{ts.strftime('%Y-%m-%d %H:%M'):<19}{ob.direction[:7]:<9}{age_min:<9.1f}{kz:<13}{'REJET: ' + reason:<35}{'-':<8}{'NON':<10}")
+                continue
+
+            proba = predict_proba(model, features, r, ob, asset)
+            ml_ok = proba >= threshold
+
+            # Simule les filtres live
+            # 1. recent_cutoff = 1 min (depuis last_bar)
+            last_bar_ts = df_m1.index[-1]
+            recent_ok = ts >= (last_bar_ts - pd.Timedelta(minutes=1))
+            # 2. BOT_START_TS : on suppose qu'au runtime le bot vient de redemarrer
+            #    (donc on regarde si l'OB est plus recent que utc_now - 5min comme test)
+            startup_ok = ts >= (utc_now - pd.Timedelta(minutes=5))
+
+            live_take = "OUI" if (ml_ok and recent_ok) else "NON"
+            verdict_str = f"TRADE ml={proba:.3f}"
+            if not ml_ok:
+                verdict_str = f"REJET ML {proba:.3f}<{threshold}"
+            elif not recent_ok:
+                age_vs_last_bar = (last_bar_ts - ts).total_seconds() / 60
+                verdict_str = f"TRADE mais age={age_vs_last_bar:.1f}min > 1min cutoff"
+
+            log.info(
+                f"{ts.strftime('%Y-%m-%d %H:%M'):<19}{ob.direction[:7]:<9}{age_min:<9.1f}{kz:<13}"
+                f"{verdict_str[:34]:<35}{proba:<8.3f}{live_take:<10}"
+            )
+            if ml_ok and recent_ok:
+                grand_total_would_trade += 1
+
+    log.info("")
+    log.info("-" * 100)
+    log.info(f"TOTAL DERNIERE HEURE : {grand_total_obs} OB analyses -> {grand_total_would_trade} auraient ete trades live")
+    log.info("=" * 90)
 
 
 # ========== MAIN LOOP ==========
