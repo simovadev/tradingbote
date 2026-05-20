@@ -152,11 +152,12 @@ def predict_proba(model, features, r, ob, instrument) -> float:
 
 # ========== PIPELINE PAR ACTIF ==========
 
-def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance: float | None = None) -> list[dict]:
+def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance: float | None = None, debug_diag: bool = False) -> list[dict]:
     """Scanne un actif : fetch bougies + pipeline Vizion + ML filter.
 
     Args:
         balance: solde courant (pour seuil ML dynamique : <3K=0.55, >=3K=0.70)
+        debug_diag: log diagnostic complet (bougies, OB, rejections) - 1 fois/5min.
 
     Returns:
         Liste de setups valides PRETS a etre executes (deja filtres ML, hors cooldown).
@@ -164,6 +165,8 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # 1. Fetch les bougies
     df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1)
     if df_m1 is None or len(df_m1) < 200:
+        if debug_diag:
+            log.info(f"DIAG {instrument}: M1 KO (df_m1={None if df_m1 is None else len(df_m1)} bougies)")
         return []
 
     # FIX 2026-05-20 : virer la DERNIERE bougie M1 (souvent en cours, pas close)
@@ -230,6 +233,13 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     recent_cutoff = now - pd.Timedelta(minutes=15)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
+    if debug_diag:
+        last_ts = df_m1.index[-1]
+        log.info(
+            f"DIAG {instrument}: M1={len(df_m1)} M15={len(df_m15)} H1={len(df_h1)} "
+            f"last_bar={last_ts} | OB_brut={len(obs)} OB+MSS={len(obs_confirmed)} OB_recent={len(obs_recent)}"
+        )
+
     if not obs_recent:
         return []
 
@@ -243,6 +253,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     threshold = ml_filter.get_dynamic_threshold(instrument, balance)
 
     valid_setups = []
+    diag_reasons: dict[str, int] = {}
     for ob in obs_recent:
         try:
             r = evaluate_ob(
@@ -256,11 +267,14 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             )
         except Exception as e:
             log.debug(f"evaluate_ob fail {instrument}: {e}")
+            diag_reasons["evaluate_ob_exception"] = diag_reasons.get("evaluate_ob_exception", 0) + 1
             continue
 
         if r.verdict != "TRADE" or r.trade_setup is None:
+            reason = r.rejection_reason or "no_trade"
             state.log_rejected(instrument, df_m1.index[ob.validation_index],
-                              ob.direction, r.rejection_reason or "no_trade")
+                              ob.direction, reason)
+            diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
             continue
 
         proba = predict_proba(model, features, r, ob, instrument)
@@ -268,6 +282,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             state.log_rejected(instrument, df_m1.index[ob.validation_index],
                               ob.direction, f"ml_below_thr_{proba:.3f}",
                               ml_proba=proba, score=r.score)
+            diag_reasons[f"ml_below_{threshold:.2f}"] = diag_reasons.get(f"ml_below_{threshold:.2f}", 0) + 1
             continue
 
         valid_setups.append({
@@ -278,6 +293,9 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             "proba": proba,
             "df_m1": df_m1,
         })
+
+    if debug_diag and diag_reasons:
+        log.info(f"DIAG {instrument}: rejets = {dict(sorted(diag_reasons.items(), key=lambda x: -x[1]))}")
 
     return valid_setups
 
@@ -310,14 +328,18 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         return False
     current_price = (tick.bid + tick.ask) / 2
     entry_setup = float(setup.entry_price)
-    derive_pct = abs(current_price - entry_setup) / current_price * 100
-    sl_distance_pct = abs(setup.entry_price - setup.stop_loss) / current_price * 100
-    # Reject si derive > 30% de la SL distance (sinon ratio risk/reward casse)
-    if derive_pct > sl_distance_pct * 0.30:
+    sl_distance = abs(setup.entry_price - setup.stop_loss)
+    derive = abs(current_price - entry_setup)
+    # FIX 2026-05-20 : check absolu en % du SL distance (et plus en % du prix qui etait trop strict)
+    # Reject si derive > 50% de la SL distance (= au-dela le RR casse a moitie)
+    # Avant : 30% absolu sur prix -> rejetait XAUUSD avec SL 0.10% du prix
+    if derive > sl_distance * 0.50:
+        derive_pct = derive / current_price * 100
+        sl_distance_pct = sl_distance / current_price * 100
         log.warning(
             f"DERIVE PRIX TROP GRANDE {instrument} : "
             f"entry={entry_setup:.5f} now={current_price:.5f} "
-            f"derive={derive_pct:.2f}% > 30%*SL({sl_distance_pct:.2f}%), SKIP"
+            f"derive={derive_pct:.3f}% > 50%*SL({sl_distance_pct:.3f}%), SKIP"
         )
         return False
 
@@ -360,19 +382,19 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
 
         if risk_per_lot == 0:
             return False
-        lots = risk_eur / risk_per_lot
+        lots_calc = risk_eur / risk_per_lot
         log.debug(f"{instrument} lots calc : sl_dist={sl_distance}, risk_per_lot={risk_per_lot:.2f}, "
-                  f"lots={lots:.4f} [source={calcul_source}]")
+                  f"lots={lots_calc:.4f} [source={calcul_source}]")
         # Arrondi au volume_step
         vol_step = info.volume_step
-        lots = max(info.volume_min, round(lots / vol_step) * vol_step)
+        # FIX 2026-05-20 : arrondi vers le BAS (pas max(volume_min, ...)) pour respecter risk vise
+        # Si lots_calc < volume_min, on prend volume_min mais on flag pour check risk
+        lots_rounded = round(lots_calc / vol_step) * vol_step
+        lots = max(info.volume_min, lots_rounded)
         lots = round(lots, 2)
 
         if lots > info.volume_max:
             lots = info.volume_max
-        if lots < info.volume_min:
-            log.warning(f"Lots calcule {lots} < min {info.volume_min} sur {instrument}, SKIP")
-            return False
 
         # === SECURITE 1 : Verifie que la perte max sur SL <= 1.5 x risk vise ===
         # Recalcul avec les MEMES valeurs que le calcul des lots (coherence)
@@ -381,12 +403,31 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         else:
             perte_si_sl = sl_distance * INSTRUMENTS[instrument]["tick_value"] * lots
 
+        # FIX 2026-05-20 (user: "0.10% et annule au lieu d'ajuster une seconde fois le lot") :
+        # Si la perte est > 1.5x risk visé, tente de réduire le lot d'un cran de volume_step
+        # AVANT de SKIP. Beaucoup d'actifs ont volume_min=0.1 mais step=0.01 -> on peut souvent
+        # descendre a 0.05 ou 0.02 et rentrer dans le risk.
+        if perte_si_sl > risk_eur * 1.5 and lots > info.volume_min:
+            # Combien de lots faut-il pour respecter risk_eur exactement ?
+            target_lots = risk_eur / risk_per_lot
+            # Arrondi au volume_step inferieur
+            target_lots = (target_lots // vol_step) * vol_step
+            target_lots = max(info.volume_min, round(target_lots, 2))
+            log.info(
+                f"{instrument} : lot {lots} -> {target_lots} (ajuste pour respecter risk {risk_eur:.2f}€)"
+            )
+            lots = target_lots
+            if tick_value_real > 0 and tick_size_real > 0:
+                perte_si_sl = (sl_distance / tick_size_real) * tick_value_real * lots
+            else:
+                perte_si_sl = sl_distance * INSTRUMENTS[instrument]["tick_value"] * lots
+
         if perte_si_sl > risk_eur * 1.5:
             log.error(
-                f"REJET {instrument} : perte SL={perte_si_sl:.2f} > 1.5x risk ({risk_eur*1.5:.2f}). "
-                f"Lots={lots} probablement faux. SKIP."
+                f"REJET {instrument} : perte SL={perte_si_sl:.2f}€ > 1.5x risk ({risk_eur*1.5:.2f}€) "
+                f"meme avec lot min {info.volume_min}. Balance trop faible pour cet actif. SKIP."
             )
-            state.log_event("WARN", f"Lots foireux {instrument} : skip")
+            state.log_event("WARN", f"Balance insuffisante {instrument} : skip")
             return False
 
         log.info(
@@ -465,8 +506,12 @@ def reconcile_closed_trades(mt5_exec: MT5Executor, state: LiveState):
     if not pending:
         return
 
+    # FIX 2026-05-20 : un LIMIT pending n'est PAS une position ouverte !
+    # Sans ce check, le bot marquait tous les LIMIT en ORPHAN 10s apres creation.
     open_positions = {p["ticket"] for p in mt5_exec.get_positions()}
-    closed_tickets = [t for t in pending if t not in open_positions]
+    pending_mt5 = {po["ticket"] for po in mt5_exec.get_pending_orders(magic=BOT_MAGIC)}
+    # Un ticket est ferme s'il n'est NI dans positions NI dans pending orders MT5
+    closed_tickets = [t for t in pending if t not in open_positions and t not in pending_mt5]
 
     if not closed_tickets:
         return
@@ -602,12 +647,15 @@ def run_live(test_dry_run: bool = False):
                 if not hasattr(state, "_seen_setups"):
                     state._seen_setups = {}
 
+                # DIAG : log diagnostic complet chaque ~5 min (1 fois par actif)
+                _diag_now = int(time.time()) % 300 < SCAN_INTERVAL_SEC
+
                 for asset in active_assets:
                     # Cooldown
                     if state.is_in_cooldown(asset, now, COOLDOWN_SEC):
                         continue
 
-                    setups = scan_asset(mt5_exec, asset, state, balance=balance)
+                    setups = scan_asset(mt5_exec, asset, state, balance=balance, debug_diag=_diag_now)
                     if not setups:
                         continue
 
