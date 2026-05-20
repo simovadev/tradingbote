@@ -852,6 +852,7 @@ def debug_last_hour(mt5_exec: MT5Executor):
     - Verdict pipeline (TRADE / REJECTED + raison)
     - Si TRADE : proba ML + serait-il pris par le live ?
     - Pourquoi le live l'aurait skip (recent_cutoff, BOT_START_TS, etc.)
+    - TEST CUTOFF : pour chaque cutoff (1, 2, 3, 5, 10 min), serait-il pris ?
     """
     from bot_v2.concepts.killzones import killzone_at
     from bot_v2.concepts.order_block import detect_order_blocks
@@ -866,13 +867,16 @@ def debug_last_hour(mt5_exec: MT5Executor):
     log.info("=" * 90)
 
     utc_now = pd.Timestamp.now(tz="UTC")
-    cutoff_1h = utc_now - pd.Timedelta(hours=1)
+    # On scanne sur 24h pour avoir un echantillon large (sinon dead zone London-NY = 0 OB)
+    cutoff_1h = utc_now - pd.Timedelta(hours=24)
 
     grand_total_obs = 0
     grand_total_would_trade = 0
+    valid_setups_all = []
+    cutoff_tests = [1, 2, 3, 5, 10, 15]
 
     for asset in LIVE_ASSETS:
-        df_m1 = mt5_exec.get_bars(asset, "M1", 500, force_sync=True)
+        df_m1 = mt5_exec.get_bars(asset, "M1", 1500, force_sync=True)
         if df_m1 is None or len(df_m1) < 200:
             continue
         df_m1 = df_m1.iloc[:-1]
@@ -903,7 +907,7 @@ def debug_last_hour(mt5_exec: MT5Executor):
         correlated_dfs = {}
         for corr_name, corr_type in SMT_PAIRS.get(asset, []):
             try:
-                df_c = mt5_exec.get_bars(corr_name, "M1", 500)
+                df_c = mt5_exec.get_bars(corr_name, "M1", 1500)
                 if df_c is not None and len(df_c) > 0:
                     correlated_dfs[corr_name] = (df_c, corr_type)
             except Exception:
@@ -924,9 +928,9 @@ def debug_last_hour(mt5_exec: MT5Executor):
         mss_setups = detect_mss_setups(df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"])
         obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
 
-        # Filtre derniere heure
-        obs_1h = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_1h]
-        if not obs_1h:
+        # Filtre 24h
+        obs_24h_list = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_1h]
+        if not obs_24h_list:
             continue
 
         loaded = load_model(asset)
@@ -935,15 +939,15 @@ def debug_last_hour(mt5_exec: MT5Executor):
         model, features = loaded
         threshold = ml_filter.get_dynamic_threshold(asset, 150.0)
 
-        log.info("")
-        log.info(f"=== {asset} === {len(obs_1h)} OB+MSS dans la derniere heure ===")
-        log.info(f"{'TS':<19}{'DIR':<9}{'AGE_MIN':<9}{'KZ':<13}{'VERDICT':<35}{'ML':<8}{'LIVE_TAKE':<10}")
-        log.info("-" * 100)
-
-        for ob in obs_1h:
+        # SIMULATION : pour chaque OB+MSS qui passe ML, simule different cutoffs.
+        # Dans la realite live, l'OB est detecte X min apres sa validation_ts
+        # a cause de la latence broker + MT5. On suppose que le bot scanne dans la
+        # minute qui suit la fermeture de la bougie de validation_ts.
+        # Donc : si recent_cutoff >= 1 min, l'OB est TOUJOURS pris (puisque le scan
+        # se passe juste apres la fermeture). Le cutoff sert a tolerer une plus grande
+        # latence MT5 ou un bot qui a "rate" un cycle de scan.
+        for ob in obs_24h_list:
             ts = df_m1.index[ob.validation_index]
-            age_min = (utc_now - ts).total_seconds() / 60
-            kz = killzone_at(ts) or "AUCUNE"
             grand_total_obs += 1
 
             try:
@@ -956,44 +960,44 @@ def debug_last_hour(mt5_exec: MT5Executor):
                     df_h1=df_h1, min_score=0, min_quality=0,
                     cache=cache,
                 )
-            except Exception as e:
-                log.info(f"{ts.strftime('%Y-%m-%d %H:%M'):<19}{ob.direction[:7]:<9}{age_min:<9.1f}{kz:<13}{'EXCEPTION: ' + str(e)[:25]:<35}{'-':<8}{'NON':<10}")
+            except Exception:
                 continue
 
             if r.verdict != "TRADE":
-                reason = (r.rejection_reason or "no_trade")[:33]
-                log.info(f"{ts.strftime('%Y-%m-%d %H:%M'):<19}{ob.direction[:7]:<9}{age_min:<9.1f}{kz:<13}{'REJET: ' + reason:<35}{'-':<8}{'NON':<10}")
                 continue
 
             proba = predict_proba(model, features, r, ob, asset)
-            ml_ok = proba >= threshold
+            if proba < threshold:
+                continue
 
-            # Simule les filtres live
-            # 1. recent_cutoff = 1 min (depuis last_bar)
-            last_bar_ts = df_m1.index[-1]
-            recent_ok = ts >= (last_bar_ts - pd.Timedelta(minutes=1))
-            # 2. BOT_START_TS : on suppose qu'au runtime le bot vient de redemarrer
-            #    (donc on regarde si l'OB est plus recent que utc_now - 5min comme test)
-            startup_ok = ts >= (utc_now - pd.Timedelta(minutes=5))
-
-            live_take = "OUI" if (ml_ok and recent_ok) else "NON"
-            verdict_str = f"TRADE ml={proba:.3f}"
-            if not ml_ok:
-                verdict_str = f"REJET ML {proba:.3f}<{threshold}"
-            elif not recent_ok:
-                age_vs_last_bar = (last_bar_ts - ts).total_seconds() / 60
-                verdict_str = f"TRADE mais age={age_vs_last_bar:.1f}min > 1min cutoff"
-
-            log.info(
-                f"{ts.strftime('%Y-%m-%d %H:%M'):<19}{ob.direction[:7]:<9}{age_min:<9.1f}{kz:<13}"
-                f"{verdict_str[:34]:<35}{proba:<8.3f}{live_take:<10}"
-            )
-            if ml_ok and recent_ok:
-                grand_total_would_trade += 1
+            # Setup VALIDE (pipeline + ML OK).
+            grand_total_would_trade += 1
+            valid_setups_all.append({"asset": asset, "ts": ts, "proba": proba})
 
     log.info("")
     log.info("-" * 100)
-    log.info(f"TOTAL DERNIERE HEURE : {grand_total_obs} OB analyses -> {grand_total_would_trade} auraient ete trades live")
+    log.info(f"TOTAL 24h : {grand_total_obs} OB analyses -> {grand_total_would_trade} passent pipeline+ML")
+    log.info("")
+    log.info("TEST RECENT_CUTOFF x LATENCE BROKER")
+    log.info("Combien de trades on prend selon (cutoff, latence MT5) :")
+    log.info(f"")
+    log.info(f"{'CUTOFF':<12}{'lag=0min':<12}{'lag=1min':<12}{'lag=2min':<12}{'lag=3min':<12}{'lag=5min':<12}")
+    log.info("-" * 70)
+    # Pour chaque (cutoff, lag), nb de trades pris :
+    # Live : a chaque scan, on a last_bar = realt_now - lag
+    # Le bot voit l'OB quand last_bar >= validation_ts -> donc scan a ts+lag
+    # Filtre : validation_ts >= last_bar - cutoff = (ts+lag) - cutoff
+    # OK si: ts >= ts + lag - cutoff <=> cutoff >= lag
+    for c in cutoff_tests:
+        row = f"{c} min".ljust(12)
+        for lag in [0, 1, 2, 3, 5]:
+            pris = grand_total_would_trade if c >= lag else 0
+            row += f"{pris}/{grand_total_would_trade}".ljust(12)
+        log.info(row)
+    log.info("=" * 90)
+    log.info("CONCLUSION : cutoff = max(latence MT5 observee)")
+    log.info("Si MT5 propage les bougies M1 en <1 min : cutoff=1 suffit")
+    log.info("Si MT5 lag occasionnellement 2-3 min : cutoff=3 recommande")
     log.info("=" * 90)
 
 
