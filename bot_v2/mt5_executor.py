@@ -101,6 +101,10 @@ class MT5Executor:
             )
         self.connected = False
         self.account_info = None
+        # FIX 2026-05-20 : Vantage broker time = GMT+3 traite comme UTC par MT5.
+        # On detecte l'offset au demarrage et on le soustrait dans get_bars() pour
+        # avoir des timestamps en UTC reel (necessaire pour killzones NY correctes).
+        self.broker_utc_offset_sec: int = 0
 
     def initialize(self, login: int | None = None, password: str | None = None,
                    server: str | None = None, path: str | None = None) -> bool:
@@ -129,6 +133,27 @@ class MT5Executor:
             f"balance={self.account_info.balance:.2f} {self.account_info.currency} "
             f"server={self.account_info.server}"
         )
+
+        # Detection broker time offset (Vantage = +3h en ete)
+        # On utilise le dernier tick EURUSD (toujours dispo) pour comparer
+        # tick.time (epoch broker treated as UTC) vs vrai UTC now.
+        try:
+            tick = mt5.symbol_info_tick("EURUSD+") or mt5.symbol_info_tick("EURUSD")
+            if tick and tick.time > 0:
+                utc_now_real = datetime.now(timezone.utc).timestamp()
+                offset = tick.time - utc_now_real
+                # Arrondi a l'heure entiere la plus proche (broker time est tjs +Nh)
+                offset_hours = round(offset / 3600)
+                self.broker_utc_offset_sec = offset_hours * 3600
+                log.info(
+                    f"Broker UTC offset detecte : {offset_hours:+d}h "
+                    f"(tick raw offset = {offset:+.0f}s) -> compense en interne"
+                )
+            else:
+                log.warning("Impossible de detecter broker offset (pas de tick EURUSD)")
+        except Exception as e:
+            log.warning(f"Detection broker offset failed : {e}")
+
         return True
 
     def shutdown(self):
@@ -165,7 +190,8 @@ class MT5Executor:
             return None
 
         df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+        # FIX 2026-05-20 : compense broker offset pour avoir des timestamps UTC reels
+        df["time"] = pd.to_datetime(df["time"] - self.broker_utc_offset_sec, unit="s", utc=True)
         df = df.set_index("time")
         df = df.rename(columns={"tick_volume": "volume"})
         # Garde seulement les cols standards
@@ -177,14 +203,17 @@ class MT5Executor:
         if tf not in TF_MAP:
             return None
         broker_sym = to_broker_symbol(symbol)
+        # Re-ajoute l'offset pour que MT5 trouve la plage broker-side correcte
+        start_broker = start + pd.Timedelta(seconds=self.broker_utc_offset_sec)
+        end_broker = end + pd.Timedelta(seconds=self.broker_utc_offset_sec)
         rates = mt5.copy_rates_range(
             broker_sym, TF_MAP[tf],
-            start.to_pydatetime(), end.to_pydatetime(),
+            start_broker.to_pydatetime(), end_broker.to_pydatetime(),
         )
         if rates is None or len(rates) == 0:
             return None
         df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+        df["time"] = pd.to_datetime(df["time"] - self.broker_utc_offset_sec, unit="s", utc=True)
         df = df.set_index("time")
         df = df.rename(columns={"tick_volume": "volume"})
         return df[["open", "high", "low", "close", "volume"]].copy()
@@ -450,7 +479,7 @@ class MT5Executor:
                 "price_open": o.price_open,
                 "sl": o.sl,
                 "tp": o.tp,
-                "time_setup": pd.Timestamp(o.time_setup, unit="s", tz="UTC"),
+                "time_setup": pd.Timestamp(o.time_setup - self.broker_utc_offset_sec, unit="s", tz="UTC"),
             })
         return out
 
@@ -495,7 +524,10 @@ class MT5Executor:
     def get_closed_deals(self, from_ts: pd.Timestamp, to_ts: pd.Timestamp,
                         magic: int | None = None) -> list[dict]:
         """Recupere les deals fermes entre 2 timestamps."""
-        deals = mt5.history_deals_get(from_ts.to_pydatetime(), to_ts.to_pydatetime())
+        # Re-ajoute l'offset broker pour query MT5 (qui attend broker time)
+        from_broker = from_ts + pd.Timedelta(seconds=self.broker_utc_offset_sec)
+        to_broker = to_ts + pd.Timedelta(seconds=self.broker_utc_offset_sec)
+        deals = mt5.history_deals_get(from_broker.to_pydatetime(), to_broker.to_pydatetime())
         if deals is None:
             return []
         out = []
@@ -511,7 +543,7 @@ class MT5Executor:
                 "volume": d.volume,
                 "price": d.price,
                 "profit": d.profit,
-                "time": pd.Timestamp(d.time, unit="s", tz="UTC"),
+                "time": pd.Timestamp(d.time - self.broker_utc_offset_sec, unit="s", tz="UTC"),
                 "comment": d.comment,
             })
         return out
