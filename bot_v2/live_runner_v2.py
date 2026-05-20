@@ -893,13 +893,11 @@ def run_live(test_dry_run: bool = False):
     if test_dry_run:
         log.info("** MODE DRY RUN - aucun ordre ne sera place **")
 
-    # FIX 2026-05-20 : tolerance 10 min sur BOT_START_TS.
-    # Avant : strict < BOT_START_TS -> ratait les setups frais qui arrivaient juste
-    # avant le demarrage (ex : 13 trades rates aujourd'hui dont entry encore valide).
-    # Maintenant : accepte les setups jusqu'a 10 min avant le boot.
-    # Le filtre age_setup_min > 60 dans execute_setup garde la securite ultime.
-    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=10)
-    log.info(f"BOT_START_TS = {BOT_START_TS} (setups <10min avant boot OK, plus vieux ignores)")
+    # User 2026-05-20 : aucun trade au demarrage. Seuls les setups dont validation_ts
+    # est >= BOT_START_TS sont pris -> bot attend les setups FRAIS qui se forment
+    # apres le boot.
+    BOT_START_TS = pd.Timestamp.now(tz="UTC")
+    log.info(f"BOT_START_TS = {BOT_START_TS} (TOUS les setups anterieurs ignores)")
 
     # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
     try:
