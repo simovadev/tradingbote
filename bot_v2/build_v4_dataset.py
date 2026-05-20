@@ -39,14 +39,14 @@ def build_one(asset: str):
     cpu_count = os.cpu_count() or 4
     chunk_months = 1 if cpu_count >= 64 else 3
 
-    print(f"\n=== ML DATASET {asset} V4 (displacement dynamique) ===")
-    print(f"Plage data : {earliest_start.date()} -> {earliest_end.date()}")
-    print(f"Bougies M1 : {len(df):,}")
-    print(f"Annees     : {(earliest_end - earliest_start).days / 365.25:.2f}")
-    print(f"Cores      : {cpu_count} -> chunks de {chunk_months} mois")
+    print(f"\n=== ML DATASET {asset} V4 (displacement dynamique) ===", flush=True)
+    print(f"Plage data : {earliest_start.date()} -> {earliest_end.date()}", flush=True)
+    print(f"Bougies M1 : {len(df):,}", flush=True)
+    print(f"Annees     : {(earliest_end - earliest_start).days / 365.25:.2f}", flush=True)
+    print(f"Cores      : {cpu_count} -> chunks de {chunk_months} mois", flush=True)
 
     output_path = Path(f"{ROOT}/data/ml_dataset_{asset}_admiral_8ans_V4.parquet")
-    build_dataset(
+    df_result = build_dataset(
         earliest_start,
         earliest_end,
         [asset],
@@ -54,6 +54,14 @@ def build_one(asset: str):
         chunk_months=chunk_months,
         ltf="M1",
     )
+
+    print(f"\n>>> RECAP {asset} V4 : {len(df_result):,} candidats totaux", flush=True)
+    if len(df_result) > 0 and "outcome" in df_result.columns:
+        closed = df_result[df_result["outcome"].isin(["WIN", "LOSS"])]
+        if len(closed) > 0:
+            wr = (closed["outcome"] == "WIN").mean() * 100
+            print(f">>> RECAP {asset} V4 : WR brut {wr:.1f}% sur {len(closed)} fermes", flush=True)
+    print("=" * 60, flush=True)
 
 
 def main():
