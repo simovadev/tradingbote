@@ -743,6 +743,9 @@ def run_live(test_dry_run: bool = False):
     except Exception as e:
         log.exception(f"Boot diagnostics failed (continue quand meme) : {e}")
 
+    # Force un DIAG au 1er scan pour ne pas attendre 5 min
+    _force_first_diag = True
+
     try:
         while True:
             try:
@@ -788,8 +791,11 @@ def run_live(test_dry_run: bool = False):
                 if not hasattr(state, "_seen_setups"):
                     state._seen_setups = {}
 
-                # DIAG : log diagnostic complet chaque ~5 min (1 fois par actif)
-                _diag_now = int(time.time()) % 300 < SCAN_INTERVAL_SEC
+                # DIAG : log diagnostic complet chaque ~5 min + 1er scan force
+                _diag_now = _force_first_diag or (int(time.time()) % 300 < SCAN_INTERVAL_SEC)
+                if _force_first_diag:
+                    _force_first_diag = False
+                    log.info(">>> DIAG FORCE (1er scan apres demarrage) <<<")
 
                 for asset in active_assets:
                     # Cooldown
