@@ -97,19 +97,39 @@ def detect_structure_breaks(
     breaks: list[StructureBreak] = []
     fvgs = detect_fvg(df)
 
+    # OPTIM V5.4 (2026-05-21) : pre-calcul des index de swings tries pour bisect.
+    # Avant : `[s for s in swings if s.index < j]` dans la double boucle = O(N3)
+    # -> 145s sur 88k bougies. Maintenant bisect O(log N) -> ~1s.
+    import bisect as _bisect
+    _swing_indices = [s.index for s in swings]  # deja trie (swings tries par index)
+
+    import numpy as _np
+
     for k, swing in enumerate(swings):
         target = swing.price
-        # Cherche la 1ere bougie qui CLOS au-dela
-        for j in range(swing.index + 1, len(df)):
-            broke_up = swing.kind == "high" and closes[j] > target
-            broke_down = swing.kind == "low" and closes[j] < target
-            if not (broke_up or broke_down):
-                continue
+        # OPTIM V5.4 : numpy argmax pour trouver la 1ere cassure (vectorise)
+        # au lieu d'une boucle Python jusqu'a len(df).
+        _start = swing.index + 1
+        if _start >= len(closes):
+            continue
+        _seg = closes[_start:]
+        if swing.kind == "high":
+            _hits = _seg > target
+        else:
+            _hits = _seg < target
+        if not _hits.any():
+            continue  # swing jamais casse
+        j = _start + int(_np.argmax(_hits))  # 1ere bougie qui casse
 
+        # On ne garde que ce bloc (1 cassure par swing)
+        if True:
+            broke_up = swing.kind == "high"
             direction: Direction = "bullish" if broke_up else "bearish"
 
-            # Tendance basee sur les swings AVANT la cassure
-            swings_before = [s for s in swings if s.index < j]
+            # Tendance basee sur les swings AVANT la cassure (bisect = O(log N))
+            # detect_trend ne regarde que les ~6 derniers swings -> on slice court.
+            _cut = _bisect.bisect_left(_swing_indices, j)
+            swings_before = swings[max(0, _cut - 20):_cut]
             trend = detect_trend(swings_before, lookback=4)
 
             if trend is None:
@@ -139,7 +159,7 @@ def detect_structure_breaks(
                 break_close=float(closes[j]),
                 has_displacement_fvg=has_fvg,
             ))
-            break  # un swing = une seule cassure
+            # un swing = une seule cassure (deja gere par argmax de la 1ere)
 
     return breaks
 
