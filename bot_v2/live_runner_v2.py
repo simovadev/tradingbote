@@ -338,30 +338,13 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
         return False
 
-    # 2. Derive prix : verifie que entry n'est pas trop loin du prix actuel (max 0.3%)
+    # User 2026-05-20 : aligne sur backtest = pas de check derive.
+    # Le LIMIT au prix OB se fill SI ET SEULEMENT SI le prix revient toucher entry.
+    # Sinon il expire dans 30 min. Pas de risque a placer le LIMIT meme si prix
+    # eloigne -> identique au backtest qui place toujours.
     info = mt5_exec.symbol_info(instrument)
     if info is None:
         log.error(f"Symbol info None pour {instrument}")
-        return False
-    tick = mt5_exec.get_tick(instrument)
-    if tick is None or tick.bid <= 0:
-        log.error(f"Tick None pour {instrument}")
-        return False
-    current_price = (tick.bid + tick.ask) / 2
-    entry_setup = float(setup.entry_price)
-    sl_distance = abs(setup.entry_price - setup.stop_loss)
-    derive = abs(current_price - entry_setup)
-    # FIX 2026-05-20 : check absolu en % du SL distance (et plus en % du prix qui etait trop strict)
-    # Reject si derive > 50% de la SL distance (= au-dela le RR casse a moitie)
-    # Avant : 30% absolu sur prix -> rejetait XAUUSD avec SL 0.10% du prix
-    if derive > sl_distance * 0.50:
-        derive_pct = derive / current_price * 100
-        sl_distance_pct = sl_distance / current_price * 100
-        log.warning(
-            f"DERIVE PRIX TROP GRANDE {instrument} : "
-            f"entry={entry_setup:.5f} now={current_price:.5f} "
-            f"derive={derive_pct:.3f}% > 50%*SL({sl_distance_pct:.3f}%), SKIP"
-        )
         return False
 
     # Calcul lots selon balance (utilise les VRAIES valeurs MT5 du broker)
