@@ -280,6 +280,20 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                         if r_d.verdict == "TRADE" and r_d.trade_setup is not None:
                             proba_d = predict_proba(model_d, features_d, r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
                             verdict_d = f"TRADE ml={proba_d:.3f} {'OK' if proba_d >= thr_d else f'<{thr_d}'}"
+                            # DUMP FEATURES si XAUUSD et ml < 0.55 -> comprendre quelles features tirent vers le bas
+                            if instrument == "XAUUSD" and proba_d < 0.55:
+                                feats_dump = ml_filter._features_from_result(r_d, ob, instrument, df_ltf=df_m1, df_d1=df_d1)
+                                # Affiche les features importantes
+                                key_feats = ["score", "quality", "ob_strength", "sweep_strength", "rr",
+                                             "atr_at_setup", "atr_ratio_100",
+                                             "dist_to_pdh_pct", "dist_to_pdl_pct", "dist_to_d1_open_pct",
+                                             "hour_of_day", "minutes_into_killzone",
+                                             "has_FVG_sync", "has_parent_ob", "has_grandparent_ob",
+                                             "has_good_zone", "has_session_direction",
+                                             "daily_bias_aligned", "kz_ny_am", "kz_london"]
+                                log.info(f"  >>> FEATURES dump (ml={proba_d:.3f}) :")
+                                for k in key_feats:
+                                    log.info(f"      {k:<25} = {feats_dump.get(k, '?')}")
                         else:
                             verdict_d = f"REJET: {(r_d.rejection_reason or 'no_trade')[:40]}"
                     except Exception as e:
