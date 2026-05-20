@@ -28,26 +28,49 @@ log = logging.getLogger(__name__)
 # Certains brokers ajoutent un suffixe (Vantage = "+" sur XAUUSD RAW ECN).
 # Le bot utilise le nom standard (XAUUSD) en interne, on traduit a la sortie/entree.
 BROKER_SYMBOL_MAP: dict[str, str] = {
-    # === ACTIFS V1 (deja branchees) ===
-    "XAUUSD": "XAUUSD+",   # Vantage RAW ECN : suffixe +
-    "SPX500": "SP500",     # Vantage : sans le X (utilise pour SMT NAS/GER)
-    "DXY":    "USDX",      # Vantage : Dollar Index CFD
-    # === ACTIFS V2 ajoutes 2026-05-18 (user demande) ===
-    # Indices : pas de suffixe Vantage
-    "DJ30":     "DJ30",
-    "UK100":    "UK100",
-    "FRA40":    "FRA40",
-    "JP225":    "Nikkei225",   # ATTENTION : nom different chez Vantage
-    # Forex majeurs USD : suffixe + sur RAW ECN
+    # === FIX 2026-05-20 : Vantage RAW ECN ajoute "+" a TOUS les forex/metaux ===
+    # Metaux
+    "XAUUSD":   "XAUUSD+",
+    "XAGUSD":   "XAGUSD+",
+    # Forex majeurs USD (RAW ECN)
+    "EURUSD":   "EURUSD+",
+    "GBPUSD":   "GBPUSD+",
+    "USDJPY":   "USDJPY+",
+    "AUDUSD":   "AUDUSD+",
     "USDCAD":   "USDCAD+",
     "USDCHF":   "USDCHF+",
-    # Les autres symboles principaux restent identiques (NAS100, GER40, BTCUSD, EURUSD, etc.)
+    "NZDUSD":   "NZDUSD+",
+    # Crypto (RAW ECN)
+    "BTCUSD":   "BTCUSD+",
+    # Indices : noms specifiques Vantage
+    "SPX500":   "SP500",       # SMT NAS/GER
+    "DXY":      "USDX",        # Dollar Index
+    "JP225":    "Nikkei225",
+    # Autres indices (pas de suffixe en general) : DJ30, UK100, FRA40, NAS100, GER40, SP500
 }
 
 
 def to_broker_symbol(symbol: str) -> str:
-    """Convertit un nom standard (XAUUSD) en nom broker (XAUUSD+)."""
-    return BROKER_SYMBOL_MAP.get(symbol, symbol)
+    """Convertit un nom standard (XAUUSD) en nom broker (XAUUSD+).
+
+    Fallback intelligent : si le symbole mappe n'existe pas chez le broker,
+    on retombe sur le nom standard.
+    """
+    mapped = BROKER_SYMBOL_MAP.get(symbol, symbol)
+    if mapped == symbol:
+        return symbol
+    # Verifie si le symbole mappe existe vraiment
+    try:
+        info = mt5.symbol_info(mapped)
+        if info is not None:
+            return mapped
+        # Fallback : essaie sans le suffixe
+        info_fallback = mt5.symbol_info(symbol)
+        if info_fallback is not None:
+            return symbol
+    except Exception:
+        pass
+    return mapped  # last resort
 
 
 def from_broker_symbol(broker_symbol: str) -> str:
