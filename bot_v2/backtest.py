@@ -99,9 +99,10 @@ def simulate_trade(
     # Option A (user 2026-05-17) : on commence a fill_idx + 1 pour ne pas examiner
     # la bougie de fill (sa mèche couvre souvent SL+TP sur WTI/NAS volatiles,
     # ce qui causait des LOSS instantanes irrealistes).
-    # FIX 2026-05-19 : cap a max_scan_bars (500 bougies = 8h M1) pour eviter
+    # FIX 2026-05-19 : cap a max_scan_bars pour eviter
     # de scanner 2.6M bougies sur chaque setup (perf x100).
-    max_scan_bars = 500
+    # V5 (2026-05-20) : 500->1440 bougies (8h->24h) pour fermer plus de trades.
+    max_scan_bars = 1440
     scan_end = min(fill_idx + 1 + max_scan_bars, len(df))
     for j in range(fill_idx + 1, scan_end):
         h = highs[j]

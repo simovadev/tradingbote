@@ -68,7 +68,7 @@ def _get_daily_levels(df_d1, validation_ts):
     return float(yesterday["high"]), float(yesterday["low"]), float(today_open), float(prev_day_open)
 
 
-def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None):
+def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None, mss_setups=None):
     """Extrait features ML V3 - cleaned & enrichi.
 
     V3 (2026-05-19) :
@@ -78,6 +78,11 @@ def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None):
     - Ajoute features volatilite : atr_at_setup, atr_ratio_100
     - Ajoute features distance : dist_to_pdh_pct, dist_to_pdl_pct, dist_to_d1_open_pct
     - Ajoute features structure : bars_since_last_swing
+
+    V5 (2026-05-20) : 4 nouvelles features
+    - phase_expansion, phase_reversal, phase_manipulation
+    - vol_ratio_setup (ATR14/ATR100)
+    - has_mss_nearby (MSS a ±10 bougies de la validation OB)
     """
     setup = r.trade_setup
     conf = r.confluences or []
@@ -166,6 +171,32 @@ def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None):
         f["dist_to_d1_open_pct"] = (entry_price - d1_open) / d1_open * 100
     else:
         f["dist_to_d1_open_pct"] = 0.0
+
+    # ==================== NEW V5 FEATURES (2026-05-20) ====================
+    # Phase de marche (feature ML pour que le ML apprenne)
+    # Note : phase_expansion existe deja en V3 (line 118), on garde mais aussi
+    # phase_reversal et phase_manipulation (transformes en bonus/malus en V5).
+    f["phase_reversal"] = int("phase_reversal" in conf_text)
+    f["phase_manipulation"] = int("phase_manipulation" in conf_text)
+
+    # Volatilite ratio courte/longue (a la validation OB)
+    if df_ltf is not None and ob.validation_index >= 100:
+        h14 = df_ltf.iloc[ob.validation_index-14:ob.validation_index]["high"]
+        l14 = df_ltf.iloc[ob.validation_index-14:ob.validation_index]["low"]
+        h100 = df_ltf.iloc[ob.validation_index-100:ob.validation_index]["high"]
+        l100 = df_ltf.iloc[ob.validation_index-100:ob.validation_index]["low"]
+        a14 = float((h14 - l14).mean())
+        a100 = float((h100 - l100).mean())
+        f["vol_ratio_setup"] = (a14 / a100) if a100 > 0 else 1.0
+    else:
+        f["vol_ratio_setup"] = 1.0
+
+    # Presence MSS proche (remplace le filtre dur confirm_ob_with_mss)
+    _mss_list = mss_setups or []
+    f["has_mss_nearby"] = int(any(
+        abs(getattr(mss, "mss", mss).break_index - ob.validation_index) <= 10
+        for mss in _mss_list
+    ))
 
     return f
 
@@ -321,18 +352,17 @@ def _process_instrument(args):
 
         df_h1_for_feu_vert = df_htf2 if df_htf2 is not None else None
 
-        # v7 (user 2026-05-16) : v5 + daily_bias relache.
-        # Base : OB confirmes par MSS (intersection comme v5).
-        # Difference vs v5 : daily_bias contraire est tolere (pas rejet).
-        from bot_v2.concepts.mss_setup import detect_mss_setups, confirm_ob_with_mss
+        # V5 (user 2026-05-20) : virer confirm_ob_with_mss (filtre trop strict).
+        # Le ML decide via feature has_mss_nearby.
+        from bot_v2.concepts.mss_setup import detect_mss_setups
         mss_setups = detect_mss_setups(
             df_ltf_w,
             structure_breaks=cache["structure_breaks"],
             swings=cache["swings_ltf"],
         )
-        obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
-        print(f"    OB total: {len(obs)}, MSS: {len(mss_setups)}, OB+MSS confirmes: {len(obs_confirmed)}", flush=True)
-        prefiltered_obs = obs_confirmed
+        cache["mss_setups"] = mss_setups
+        print(f"    OB total: {len(obs)}, MSS: {len(mss_setups)}", flush=True)
+        prefiltered_obs = obs
         prefiltered_mss = []
 
         rows = []
@@ -355,7 +385,7 @@ def _process_instrument(args):
             if r.trade_setup is None:
                 continue
 
-            f = _extract_features(r, ob, inst, df_ltf=df_ltf_w, df_d1=df_d1, df_htf=df_htf)
+            f = _extract_features(r, ob, inst, df_ltf=df_ltf_w, df_d1=df_d1, df_htf=df_htf, mss_setups=mss_setups)
 
             # Simulate trade pour avoir l'outcome
             try:
@@ -513,11 +543,15 @@ def _chunk_worker(args):
     return inst, cs.date(), len(rows), None
 
 
-def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_months=6, ltf="M1"):
+def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_months=6, ltf="M1", version_suffix=""):
     """Construit le dataset ML pour la fenetre [start_ts, end_ts].
 
     Decoupage en CHUNKS de chunk_months mois pour eviter OOM
     (5 ans M1 = 1.7M bougies, le pipeline n'arrive pas a le traiter d'un coup).
+
+    Args:
+        version_suffix: ajoute au nom du dossier de chunks (ex: "_V5" -> ml_partial_M1_V5/).
+                        Evite de melanger les chunks V4/V5 (features differentes).
     """
     if instruments is None:
         instruments = primary_instruments()
@@ -541,7 +575,7 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     # FIX 2026-05-19 : auto-detect Windows vs Linux path
     import sys as _sys
     _root = "c:/Users/Shadow/TradingBot" if _sys.platform == "win32" else "/workspace/TradingBot"
-    partial_dir = Path(f"{_root}/data/ml_partial_{ltf}")
+    partial_dir = Path(f"{_root}/data/ml_partial_{ltf}{version_suffix}")
     partial_dir.mkdir(parents=True, exist_ok=True)
 
     # Construit la liste des taches a faire (skip celles deja sauvegardees)

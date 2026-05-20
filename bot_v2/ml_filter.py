@@ -36,12 +36,18 @@ ALL_ASSETS = ["XAUUSD", "NAS100", "GER40", "BTCUSD",
               "USDCAD", "USDCHF"]
 
 def _pick_model(asset: str) -> Path:
-    """Cherche V4 d'abord, fallback V3.5."""
+    """Cherche V5 > V4 > V3.5."""
+    v5 = Path(f"{_MBASE}/ml_model_{asset}_admiral_v5.pkl")
+    if v5.exists():
+        return v5
     v4 = Path(f"{_MBASE}/ml_model_{asset}_admiral_v4.pkl")
     v3_5 = Path(f"{_MBASE}/ml_model_{asset}_admiral_v3_5.pkl")
     return v4 if v4.exists() else v3_5
 
 def _pick_features(asset: str) -> Path:
+    v5 = Path(f"{_MBASE}/ml_features_{asset}_admiral_v5.json")
+    if v5.exists():
+        return v5
     v4 = Path(f"{_MBASE}/ml_features_{asset}_admiral_v4.json")
     v3_5 = Path(f"{_MBASE}/ml_features_{asset}_admiral_v3_5.json")
     return v4 if v4.exists() else v3_5
@@ -178,12 +184,16 @@ def predict_proba_for_tf(r, ob, instrument: str, tf: str = "M1") -> float | None
     return float(model.predict_proba(X)[0, 1])
 
 
-def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None) -> dict:
-    """Reproduit EXACTEMENT les features V3.5 du dataset ML (ml_dataset.py _extract_features).
+def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None) -> dict:
+    """Reproduit EXACTEMENT les features V3.5/V4/V5 du dataset ML (ml_dataset.py _extract_features).
 
     FIX CRITIQUE 2026-05-20 : avant, 11 features etaient absentes en live (atr, dist_pdh,
     hour_of_day, etc.) -> le ML recevait 0 et donnait des probas catastrophiques (0.04-0.26).
-    Maintenant aligne sur le training V3.5.
+    Maintenant aligne sur le training V5.
+
+    V5 (2026-05-20) : 4 nouvelles features :
+    - phase_reversal, phase_manipulation, vol_ratio_setup, has_mss_nearby
+    (phase_expansion existe deja comme has_phase_expansion)
     """
     setup = r.trade_setup
     conf = r.confluences or []
@@ -294,10 +304,33 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None) -> di
     else:
         f["dist_to_d1_open_pct"] = 0.0
 
+    # ==================== NEW V5 FEATURES (2026-05-20) ====================
+    f["phase_reversal"] = int("phase_reversal" in conf_text)
+    f["phase_manipulation"] = int("phase_manipulation" in conf_text)
+
+    # Volatilite ratio courte/longue (a la validation OB)
+    if df_ltf is not None and ob.validation_index is not None and ob.validation_index >= 100:
+        h14_v = df_ltf.iloc[ob.validation_index-14:ob.validation_index]["high"]
+        l14_v = df_ltf.iloc[ob.validation_index-14:ob.validation_index]["low"]
+        h100_v = df_ltf.iloc[ob.validation_index-100:ob.validation_index]["high"]
+        l100_v = df_ltf.iloc[ob.validation_index-100:ob.validation_index]["low"]
+        a14_v = float((h14_v - l14_v).mean())
+        a100_v = float((h100_v - l100_v).mean())
+        f["vol_ratio_setup"] = (a14_v / a100_v) if a100_v > 0 else 1.0
+    else:
+        f["vol_ratio_setup"] = 1.0
+
+    # Presence MSS proche (remplace le filtre dur confirm_ob_with_mss)
+    _mss_list = mss_setups or []
+    f["has_mss_nearby"] = int(any(
+        abs(getattr(mss, "mss", mss).break_index - ob.validation_index) <= 10
+        for mss in _mss_list
+    ))
+
     return f
 
 
-def predict_proba(r, ob, instrument: str) -> float:
+def predict_proba(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None) -> float:
     """Retourne la probabilite de WIN [0,1] selon le modele specifique a l'actif."""
     # Multi-asset (user 2026-05-16) : utilise le modele par instrument si dispo
     loaded = load_model_for_instrument(instrument)
@@ -305,7 +338,7 @@ def predict_proba(r, ob, instrument: str) -> float:
         model, features = loaded
     else:
         model, features = _load()
-    feat_dict = _features_from_result(r, ob, instrument)
+    feat_dict = _features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups)
     X = pd.DataFrame([[feat_dict.get(f, 0) for f in features]], columns=features)
     return float(model.predict_proba(X)[0, 1])
 
@@ -319,15 +352,17 @@ def get_dynamic_threshold(instrument: str, balance: float | None = None) -> floa
     return ML_THRESHOLDS.get(instrument, DEFAULT_THRESHOLD)
 
 
-def should_take(r, ob, instrument: str, balance: float | None = None) -> tuple[bool, float]:
+def should_take(r, ob, instrument: str, balance: float | None = None,
+                df_ltf=None, df_d1=None, mss_setups=None) -> tuple[bool, float]:
     """Decide si on prend le trade selon le ML.
 
     Args:
         balance: compte actuel (optionnel). Si fourni, applique seuil dynamique.
+        df_ltf, df_d1, mss_setups: passes a _features_from_result (V5 features).
 
     Returns:
         (accept, proba) : accept=True si proba >= threshold pour l'actif.
     """
-    proba = predict_proba(r, ob, instrument)
+    proba = predict_proba(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups)
     threshold = get_dynamic_threshold(instrument, balance)
     return proba >= threshold, proba

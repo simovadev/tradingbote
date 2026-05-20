@@ -139,8 +139,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V4 > V3_5 > V2 legacy
+    # Cascade : V5 > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v5.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_admiral_v5.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v4.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_admiral_v4.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v3_5.pkl",
@@ -154,7 +156,14 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            version = "V4" if "_v4" in mp.name else ("V3.5" if "_v3_5" in mp.name else "V2-legacy")
+            if "_v5" in mp.name:
+                version = "V5"
+            elif "_v4" in mp.name:
+                version = "V4"
+            elif "_v3_5" in mp.name:
+                version = "V3.5"
+            else:
+                version = "V2-legacy"
             break
 
     if model_path is None:

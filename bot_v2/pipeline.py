@@ -207,11 +207,13 @@ def evaluate_ob(
         res.confluences.append(f"session_reversal_{session_ctx.session_name}")
 
     # ========== 2-ter. PHASE DE MARCHE (bible §11.1 Pm29OIifOns) ==========
-    # "On trade UNIQUEMENT l'Expansion et le Reversal."
-    # Accumulation/Manipulation = ELIMINATOIRE. Undetermined = laisse passer.
+    # V5 (user 2026-05-20) : phase manipulation passe en malus (volatilite forte
+    # = retournement violent ICT, pattern cible). Accumulation reste REJET
+    # (marche vraiment mort, pas de direction).
     phase = analyze_phase(df_ltf, ob.validation_index, lookback=20)
-    if phase.phase in ("accumulation", "manipulation"):
-        res.rejection_reason = f"Phase {phase.phase} (non tradable) — {phase.reason}"
+    if phase.phase == "accumulation":
+        # Bible §11.1 : marche mort, on ne trade pas
+        res.rejection_reason = f"Phase accumulation (range trop serre) — {phase.reason}"
         return res
     if phase.phase == "expansion":
         res.score += 15
@@ -219,6 +221,10 @@ def evaluate_ob(
     elif phase.phase == "reversal":
         res.score += 18
         res.confluences.append("phase_reversal")
+    elif phase.phase == "manipulation":
+        # V5 : autorise (retournement violent = pattern cible user)
+        res.score -= 8
+        res.confluences.append("phase_manipulation_malus")
 
     # ========== 2-quater. DISPLACEMENT - V4 : feature ML uniquement (user 2026-05-20) ==========
     # V3.5 : filtre dur min_displacement_atr -> rejetait setups en volatilite

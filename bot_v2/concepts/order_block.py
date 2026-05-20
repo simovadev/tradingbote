@@ -66,7 +66,7 @@ def detect_order_blocks(
     swing_strength: int = 2,
     max_group_size: int = 5,
     min_group_size: int = 1,
-    max_bars_after_sweep: int = 10,
+    max_bars_after_sweep: int = 30,
     min_sweep_depth_atr: float = 0.0,
 ) -> list[OrderBlock]:
     """Detecte tous les OB valides dans le DataFrame.

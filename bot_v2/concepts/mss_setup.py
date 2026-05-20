@@ -67,7 +67,7 @@ def detect_mss_setups(
     swing_strength: int = 3,        # +strict (5 -> 7 bougies)
     max_bars_to_retest: int = 30,
     sl_buffer_pct: float = 0.0005,
-    min_displacement_atr: float = 0.5,   # bougie de break >= 0.5 * ATR
+    min_displacement_atr: float = 0.3,   # V5 (user 2026-05-20) : 0.5->0.3 (MSS plus sensible en volatilite moyenne)
     min_swing_age_bars: int = 5,         # le swing casse doit etre vieux d'au moins 5 bougies
 ) -> list[MSSSetup]:
     """Detecte les setups MSS tradables.
