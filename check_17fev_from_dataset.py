@@ -22,7 +22,7 @@ sys.path.insert(0, ROOT)
 DAY = "2026-02-17"
 ASSET = "XAUUSD"
 
-dataset_path = Path(f"{ROOT}/data/ml_dataset_{ASSET}_admiral_3mois_V5.parquet")
+dataset_path = Path(f"{ROOT}/data/ml_dataset_{ASSET}_admiral_8ans_V5.parquet")
 model_path = Path(f"{ROOT}/bot_v2/ml_model_{ASSET}_admiral_v5.pkl")
 features_path = Path(f"{ROOT}/bot_v2/ml_features_{ASSET}_admiral_v5.json")
 
