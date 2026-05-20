@@ -17,6 +17,13 @@ import argparse
 import logging
 from pathlib import Path
 
+# FIX (2026-05-20) : limiter les threads par process pour permettre 14 replays en parallele
+# Sans ça, chaque LightGBM/OpenMP cree 96 threads -> 14*96=1344 threads -> crash "Resource temporarily unavailable"
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
+os.environ.setdefault("MKL_NUM_THREADS", "2")
+os.environ.setdefault("LIGHTGBM_NUM_THREADS", "2")
+
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
