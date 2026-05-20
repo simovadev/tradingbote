@@ -241,10 +241,13 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
         if obs_confirmed:
             latest_ob_ts = df_m1.index[max(ob.validation_index for ob in obs_confirmed)]
         kz_now = killzone_at(last_ts) or "AUCUNE"
+        # Compte aussi sur 60 min pour comparaison (vs notre fenetre 15 min)
+        cutoff_60 = last_ts - pd.Timedelta(minutes=60)
+        n_obs_60min = sum(1 for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_60)
         log.info(
             f"DIAG {instrument}: M1={len(df_m1)} M15={len(df_m15)} H1={len(df_h1)} "
             f"last_bar={last_ts} kz={kz_now} | OB_brut={len(obs)} OB+MSS={len(obs_confirmed)} "
-            f"latest_OB_MSS_ts={latest_ob_ts} OB_recent_15min={len(obs_recent)}"
+            f"latest_OB_MSS_ts={latest_ob_ts} OB_60min={n_obs_60min} OB_15min={len(obs_recent)}"
         )
 
     if not obs_recent:
@@ -261,6 +264,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
 
     valid_setups = []
     diag_reasons: dict[str, int] = {}
+    diag_ml_probas: list[float] = []  # toutes les probas ML calculees (rejet inclus)
     for ob in obs_recent:
         try:
             r = evaluate_ob(
@@ -285,6 +289,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             continue
 
         proba = predict_proba(model, features, r, ob, instrument)
+        diag_ml_probas.append(proba)
         if proba < threshold:
             state.log_rejected(instrument, df_m1.index[ob.validation_index],
                               ob.direction, f"ml_below_thr_{proba:.3f}",
@@ -301,8 +306,14 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             "df_m1": df_m1,
         })
 
-    if debug_diag and diag_reasons:
-        log.info(f"DIAG {instrument}: rejets = {dict(sorted(diag_reasons.items(), key=lambda x: -x[1]))}")
+    if debug_diag and (diag_reasons or diag_ml_probas):
+        proba_summary = ""
+        if diag_ml_probas:
+            proba_summary = (
+                f" | probas_ML={[f'{p:.3f}' for p in diag_ml_probas]} "
+                f"(seuil={threshold:.2f})"
+            )
+        log.info(f"DIAG {instrument}: rejets = {dict(sorted(diag_reasons.items(), key=lambda x: -x[1]))}{proba_summary}")
 
     return valid_setups
 
