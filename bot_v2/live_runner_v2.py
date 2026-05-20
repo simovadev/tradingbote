@@ -246,7 +246,10 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
         n_new = buffer.update()
         if debug_diag and n_new > 0:
             log.info(f"BUFFER {instrument}: +{n_new} nouvelles M1")
-        df_m1 = buffer.get_m1()
+        # IMPORTANT : on limite a N_BARS_M1 (80k = ~55j) pour ne PAS calculer
+        # swings/fvg/breakers sur 200k bougies (= ~30s/scan x 14 actifs = trop lent)
+        # Le buffer stocke 200k mais on lit seulement les dernieres 80k
+        df_m1 = buffer.get_m1(n=N_BARS_M1)
         if df_m1 is None or len(df_m1) < 200:
             if debug_diag:
                 log.info(f"DIAG {instrument}: buffer M1 vide")
