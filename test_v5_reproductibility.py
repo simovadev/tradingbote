@@ -7,10 +7,13 @@ avec EXACTEMENT le meme code que le scan live, pour confirmer que :
 
 Usage : python test_v5_reproductibility.py
 """
+import os
 import sys
 import pandas as pd
 
-sys.path.insert(0, "c:/Users/Shadow/TradingBot")
+# Auto-detect root (le dossier du script)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
 
 from bot_v2.mt5_executor import MT5Executor
 from bot_v2.config import get_param, SMT_PAIRS
@@ -46,8 +49,8 @@ SIMU_SETUPS = [
 
 def load_model_v5(asset):
     """Charge le modele V5 d'un actif."""
-    pkl = f"c:/Users/Shadow/TradingBot/bot_v2/ml_model_{asset}_admiral_v5.pkl"
-    feat = f"c:/Users/Shadow/TradingBot/bot_v2/ml_features_{asset}_admiral_v5.json"
+    pkl = os.path.join(ROOT, "bot_v2", f"ml_model_{asset}_admiral_v5.pkl")
+    feat = os.path.join(ROOT, "bot_v2", f"ml_features_{asset}_admiral_v5.json")
     with open(pkl, "rb") as f:
         model = pickle.load(f)
     features = json.loads(open(feat).read())["features"]
