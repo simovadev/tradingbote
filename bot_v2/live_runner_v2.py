@@ -1285,12 +1285,29 @@ def run_live(test_dry_run: bool = False):
                     _force_first_diag = False
                     log.info(">>> DIAG FORCE (1er scan apres demarrage) <<<")
 
-                for asset in active_assets:
-                    # Cooldown
-                    if state.is_in_cooldown(asset, now, COOLDOWN_SEC):
-                        continue
+                # V5.4 : scan parallele des 14 actifs (ThreadPoolExecutor)
+                # Avant : sequentiel ~70s/cycle. Apres : ~5-10s/cycle (14x plus rapide).
+                from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                    setups = scan_asset(mt5_exec, asset, state, balance=balance, debug_diag=_diag_now)
+                # Filtre actifs hors cooldown
+                _assets_to_scan = [a for a in active_assets if not state.is_in_cooldown(a, now, COOLDOWN_SEC)]
+
+                _setups_by_asset: dict[str, list] = {}
+                with ThreadPoolExecutor(max_workers=min(14, len(_assets_to_scan) or 1)) as _executor:
+                    _futures = {
+                        _executor.submit(scan_asset, mt5_exec, a, state, balance, _diag_now): a
+                        for a in _assets_to_scan
+                    }
+                    for _f in as_completed(_futures):
+                        _a = _futures[_f]
+                        try:
+                            _setups_by_asset[_a] = _f.result()
+                        except Exception as _e:
+                            log.error(f"scan_asset {_a} exception : {_e}")
+                            _setups_by_asset[_a] = []
+
+                for asset in active_assets:
+                    setups = _setups_by_asset.get(asset, [])
                     if not setups:
                         continue
 
