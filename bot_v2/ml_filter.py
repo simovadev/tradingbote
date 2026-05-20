@@ -253,12 +253,30 @@ def predict_proba(r, ob, instrument: str) -> float:
     return float(model.predict_proba(X)[0, 1])
 
 
-def should_take(r, ob, instrument: str) -> tuple[bool, float]:
+def get_dynamic_threshold(instrument: str, balance: float | None = None) -> float:
+    """Seuil dynamique selon le compte (user 2026-05-20 strategie sprint+conso).
+
+    Phase Sprint (compte <3000E)    : seuil 0.55 -> +volume, +cycles compound
+    Phase Conso  (compte >=3000E)   : seuil 0.70 -> +qualite, +safe
+
+    Si balance=None : fallback sur le seuil statique ML_THRESHOLDS (0.70 V4).
+    """
+    if balance is None:
+        return ML_THRESHOLDS.get(instrument, DEFAULT_THRESHOLD)
+    if balance < 3000:
+        return 0.55  # Sprint
+    return 0.70  # Consolidation
+
+
+def should_take(r, ob, instrument: str, balance: float | None = None) -> tuple[bool, float]:
     """Decide si on prend le trade selon le ML.
+
+    Args:
+        balance: compte actuel (optionnel). Si fourni, applique seuil dynamique.
 
     Returns:
         (accept, proba) : accept=True si proba >= threshold pour l'actif.
     """
     proba = predict_proba(r, ob, instrument)
-    threshold = ML_THRESHOLDS.get(instrument, DEFAULT_THRESHOLD)
+    threshold = get_dynamic_threshold(instrument, balance)
     return proba >= threshold, proba

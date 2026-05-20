@@ -152,8 +152,11 @@ def predict_proba(model, features, r, ob, instrument) -> float:
 
 # ========== PIPELINE PAR ACTIF ==========
 
-def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState) -> list[dict]:
+def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance: float | None = None) -> list[dict]:
     """Scanne un actif : fetch bougies + pipeline Vizion + ML filter.
+
+    Args:
+        balance: solde courant (pour seuil ML dynamique : <3K=0.55, >=3K=0.70)
 
     Returns:
         Liste de setups valides PRETS a etre executes (deja filtres ML, hors cooldown).
@@ -229,7 +232,9 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState) -> list
     if loaded is None:
         return []
     model, features = loaded
-    threshold = ml_filter.ML_THRESHOLDS.get(instrument, 0.55)
+    # V4.1 (user 2026-05-20) : seuil dynamique selon balance
+    # < 3000E -> 0.55 (sprint, +volume) | >= 3000E -> 0.70 (conso, +qualite)
+    threshold = ml_filter.get_dynamic_threshold(instrument, balance)
 
     valid_setups = []
     for ob in obs_recent:
@@ -522,6 +527,8 @@ def run_live(test_dry_run: bool = False):
                 # le capital de calcul. Si LOSS, c'est le cash reel qui est entame.
                 BONUS_EUR = 50.0
                 balance = mt5_exec.get_balance() + BONUS_EUR
+                # V4.1 : seuil ML dynamique selon balance
+                _ml_thr = "0.55 (Sprint)" if balance < 3000 else "0.70 (Conso)"
                 active_assets = get_active_assets(balance)
                 n_open = mt5_exec.get_n_open_positions()
                 # V2 : on compte aussi les pending orders (ils peuvent devenir des positions)
@@ -545,7 +552,7 @@ def run_live(test_dry_run: bool = False):
                     if state.is_in_cooldown(asset, now, COOLDOWN_SEC):
                         continue
 
-                    setups = scan_asset(mt5_exec, asset, state)
+                    setups = scan_asset(mt5_exec, asset, state, balance=balance)
                     if not setups:
                         continue
 
