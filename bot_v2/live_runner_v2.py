@@ -690,9 +690,170 @@ def boot_diagnostics(mt5_exec: MT5Executor, state: LiveState):
         age = (utc_now - po["time_setup"]).total_seconds() / 60
         log.info(f"   PEND {po['symbol']} ticket={po['ticket']} age={age:.1f}min")
 
+    # === 6. SIMULATION RETROSPECTIVE 24h : qu'aurait fait le bot ?
+    log.info("=" * 70)
+    log.info("SIMULATION RETROSPECTIVE 24h - quels trades on aurait pris ?")
+    log.info("=" * 70)
+    simulate_last_24h(mt5_exec)
+
     log.info("=" * 70)
     log.info("FIN BOOT DIAGNOSTICS")
     log.info("=" * 70)
+
+
+def simulate_last_24h(mt5_exec: MT5Executor):
+    """Rejoue le pipeline sur les 24 dernieres heures pour chaque actif.
+    Compte les setups qui auraient passe ML+pipeline -> trade vrai.
+    """
+    from bot_v2.concepts.killzones import killzone_at
+
+    utc_now = pd.Timestamp.now(tz="UTC")
+    cutoff_24h = utc_now - pd.Timedelta(hours=24)
+
+    total_setups = 0
+    total_passed = 0
+    all_trades = []
+
+    for asset in LIVE_ASSETS:
+        # Fetch 1500 bougies M1 = 25h (couvre les 24h)
+        df_m1 = mt5_exec.get_bars(asset, "M1", 1500)
+        if df_m1 is None or len(df_m1) < 200:
+            continue
+        df_m1 = df_m1.iloc[:-1]  # exclure bougie en cours
+
+        df_m15 = mt5_exec.get_bars(asset, "M15", 500)
+        df_h1 = mt5_exec.get_bars(asset, "H1", 500)
+        if df_m15 is None or df_h1 is None:
+            continue
+        df_m15 = df_m15.iloc[:-1]
+        df_h1 = df_h1.iloc[:-1]
+
+        try:
+            df_d1 = mt5_exec.get_bars(asset, "D1", 100)
+            if df_d1 is None or len(df_d1) < 10:
+                df_d1 = build_d1_from_h1(df_h1)
+        except Exception:
+            df_d1 = build_d1_from_h1(df_h1)
+
+        # HTF + SMT
+        htf_dfs = {"H1": df_h1, "D1": df_d1}
+        try:
+            df_h4 = mt5_exec.get_bars(asset, "H4", 500)
+            if df_h4 is not None:
+                htf_dfs["H4"] = df_h4
+        except Exception:
+            pass
+        htf_swings = collect_htf_swings(htf_dfs, swing_strength=3)
+
+        correlated_dfs = {}
+        for corr_name, corr_type in SMT_PAIRS.get(asset, []):
+            try:
+                df_c = mt5_exec.get_bars(corr_name, "M1", 1500)
+                if df_c is not None and len(df_c) > 0:
+                    correlated_dfs[corr_name] = (df_c, corr_type)
+            except Exception:
+                continue
+
+        # Detection
+        sws = get_param(asset, "swing_strength_m1", 2)
+        from bot_v2.concepts.order_block import detect_order_blocks
+        from bot_v2.concepts.mss_setup import detect_mss_setups, confirm_ob_with_mss
+        from bot_v2.concepts.liquidity import find_swings
+        from bot_v2.concepts.structure import detect_structure_breaks, detect_trend
+        from bot_v2.concepts.fvg import detect_fvg
+        from bot_v2.concepts.breaker import detect_breakers
+
+        obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+        cache = {
+            "swings_ltf": find_swings(df_m1, strength=sws),
+            "fvgs_ltf": detect_fvg(df_m1),
+            "breakers_ltf": detect_breakers(df_m1),
+            "obs_htf": detect_order_blocks(df_m15),
+        }
+        cache["structure_breaks"] = detect_structure_breaks(df_m1, swings=cache["swings_ltf"])
+        cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
+        cache["obs_htf2"] = detect_order_blocks(df_h1)
+
+        mss_setups = detect_mss_setups(df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"])
+        obs_confirmed = confirm_ob_with_mss(obs, mss_setups, window_bars=10)
+
+        # Filtre 24h
+        obs_24h = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= cutoff_24h]
+
+        # Pipeline ML
+        loaded = load_model(asset)
+        if loaded is None:
+            continue
+        model, features = loaded
+        threshold = ml_filter.get_dynamic_threshold(asset, 150.0)
+
+        n_setups = len(obs_24h)
+        n_passed = 0
+        rejets_24h = {}
+        probas_passed = []
+
+        for ob in obs_24h:
+            try:
+                r = evaluate_ob(
+                    ob, df_m1, df_m15, df_d1, asset,
+                    ltf_name="M1", htf_name="M15",
+                    df_htf2=df_h1, htf2_name="H1",
+                    correlated_dfs=correlated_dfs,
+                    htf_swings=htf_swings,
+                    df_h1=df_h1, min_score=0, min_quality=0,
+                    cache=cache,
+                )
+            except Exception:
+                rejets_24h["evaluate_exception"] = rejets_24h.get("evaluate_exception", 0) + 1
+                continue
+
+            if r.verdict != "TRADE" or r.trade_setup is None:
+                reason = r.rejection_reason or "no_trade"
+                # Tronque les raisons longues pour la lisibilite
+                if "displacement" in reason.lower():
+                    reason = "displacement_faible"
+                elif "killzone" in reason.lower():
+                    reason = "killzone_hors"
+                rejets_24h[reason] = rejets_24h.get(reason, 0) + 1
+                continue
+
+            proba = predict_proba(model, features, r, ob, asset)
+            if proba < threshold:
+                rejets_24h[f"ml_below_{threshold:.2f}"] = rejets_24h.get(f"ml_below_{threshold:.2f}", 0) + 1
+                continue
+
+            n_passed += 1
+            probas_passed.append(proba)
+            kz = killzone_at(df_m1.index[ob.validation_index]) or "?"
+            all_trades.append({
+                "asset": asset,
+                "ts": df_m1.index[ob.validation_index],
+                "direction": ob.direction,
+                "proba": proba,
+                "killzone": kz,
+            })
+
+        total_setups += n_setups
+        total_passed += n_passed
+        if n_setups > 0:
+            log.info(
+                f"{asset:<10} setups_24h={n_setups:>3} passes={n_passed:>2} "
+                f"rejets={dict(sorted(rejets_24h.items(), key=lambda x: -x[1])[:3])}"
+            )
+
+    log.info("-" * 70)
+    log.info(f"TOTAL : {total_setups} setups detectes en 24h -> {total_passed} auraient ete trades")
+
+    if all_trades:
+        all_trades.sort(key=lambda t: t["ts"])
+        log.info("")
+        log.info("Liste des trades (chronologique) :")
+        for t in all_trades:
+            ts = t["ts"].strftime("%Y-%m-%d %H:%M")
+            log.info(
+                f"   {ts} | {t['asset']:<8} | {t['direction']:<8} | "
+                f"kz={t['killzone']:<12} | ML={t['proba']:.3f}"
+            )
 
 
 # ========== MAIN LOOP ==========
