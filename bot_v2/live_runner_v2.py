@@ -101,16 +101,18 @@ BOT_MAGIC = 20260517
 
 # History candles to fetch
 # V5.4 (2026-05-21) : utilise DataBuffer (data_vantage/) au lieu de MT5 direct.
-# Avantages :
-#   - 7+ mois d'historique (vs limite MT5 80k = 55j)
-#   - Scan plus rapide (lit en memoire au lieu de fetch MT5)
-#   - Auto-update : a chaque scan, ajoute juste les nouvelles bougies
-#   - Auto-save : sauve sur disque toutes les 5 min
-# Les variables N_BARS_* ne sont plus utilisees (le buffer charge tout).
-N_BARS_M1 = 80000    # fallback si buffer KO
-N_BARS_M15 = 5500
-N_BARS_H1 = 1320
-N_BARS_D1 = 100
+# Buffer charge 200k+ M1 mais on lit que ce qu'il faut pour matcher le TRAINING.
+#
+# TRAINING (ml_dataset.py) calcule sur :
+#   - df_ltf_w (M1) : chunk 3 mois = ~88k M1
+#   - df_htf (M15) : chunk + 30j buffer = ~4 mois = ~11k M15
+#   - df_htf2 (H1) : chunk + 30j buffer = ~2800 H1
+#   - df_d1 : ~120 D1 (4 mois)
+# Le LIVE doit utiliser les MEMES tailles pour matcher les features.
+N_BARS_M1 = 88000    # = chunk 3 mois training (~88k)
+N_BARS_M15 = 11000   # = chunk + buffer 4 mois training
+N_BARS_H1 = 2800     # = chunk + buffer 4 mois training
+N_BARS_D1 = 120      # = chunk + buffer 4 mois training
 
 # Buffers data par actif (init dans main(), un par asset)
 DATA_BUFFERS: dict[str, "DataBuffer"] = {}
