@@ -133,11 +133,21 @@ def backtest(asset, last_days):
             correlated_dfs[corr_name] = (df_c, corr_type)
 
     # 6. Pour chaque OB : evaluate (avec cache partage)
+    print(f"\n  >>> DEBUT EVALUATION ({len(obs_test)} OBs)", flush=True)
     trades = []
     rejets = {}
     all_probas = []
     t0 = time.time()
+    t_last = t0
     for i, ob in enumerate(obs_test):
+        # Log toutes les 10 OBs
+        if i > 0 and i % 10 == 0:
+            elapsed = time.time() - t0
+            speed = i / elapsed if elapsed > 0 else 0
+            eta = (len(obs_test) - i) / speed if speed > 0 else 0
+            print(f"    [{i}/{len(obs_test)}] elapsed={elapsed:.0f}s speed={speed:.1f}OB/s eta={eta:.0f}s | trades={len(trades)} probas_ml_evaluees={len(all_probas)}", flush=True)
+            t_last = time.time()
+
         try:
             r = evaluate_ob(
                 ob, df_m1, df_m15, df_d1, asset,
@@ -187,7 +197,7 @@ def backtest(asset, last_days):
             "outcome": tr.outcome, "pnl_usd": tr.pnl_usd,
         })
 
-    print(f"  Pipeline+ML : {time.time()-t0:.1f}s pour {len(obs_test)} OBs", flush=True)
+    print(f"\n  Pipeline+ML : {time.time()-t0:.1f}s pour {len(obs_test)} OBs ({len(obs_test)/(time.time()-t0):.1f} OB/s)", flush=True)
 
     # 7. Stats
     df_trades = pd.DataFrame(trades)
