@@ -18,9 +18,10 @@ import pandas as pd
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
-# Periode : derniere semaine
+# Periode : derniers N jours (configurable via env DAYS)
 END_TS = pd.Timestamp("2026-05-19", tz="UTC")
-START_TS = END_TS - pd.Timedelta(days=7)
+_DAYS = int(os.environ.get("DAYS", "7"))
+START_TS = END_TS - pd.Timedelta(days=_DAYS)
 
 ASSETS = [
     "XAUUSD", "NAS100", "GER40", "BTCUSD",
@@ -129,12 +130,12 @@ def main():
     print("-" * 130)
 
     # Total
-    print(f"\n{'TOTAL 14 ACTIFS (7 jours)':<8}")
+    print(f"\nTOTAL 14 ACTIFS ({_DAYS} jours)")
     for thr in THRESHOLDS:
         n = totaux[f"trades_{thr}"]
         pnl = totaux[f"pnl_{thr}"]
         if n > 0:
-            print(f"  Seuil {thr:.2f} : {n:>4} trades sur 7j ({n/7:.1f}/jour) | PnL total: {pnl:+.2f}$")
+            print(f"  Seuil {thr:.2f} : {n:>4} trades sur {_DAYS}j ({n/_DAYS:.1f}/jour) | PnL total: {pnl:+.2f}$")
         else:
             print(f"  Seuil {thr:.2f} : 0 trades")
 
