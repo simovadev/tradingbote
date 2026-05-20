@@ -1,0 +1,33 @@
+=== NAS100 V5 ===
+Source dataset : V5
+Total closed   : 82,654
+WR brut        : 33.4%
+AUC TEST       : 0.828
+  seuil=0.50 :  3566 trades, WR=66.3%
+  seuil=0.55 :  2844 trades, WR=69.3%
+  seuil=0.60 :  2214 trades, WR=72.6%
+  seuil=0.65 :  1619 trades, WR=75.3%
+  seuil=0.70 :  1098 trades, WR=77.2%
+  seuil=0.75 :   660 trades, WR=79.7%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdh_pct                  794
+  dist_to_pdl_pct                  727
+  risk_points                      713
+  retest_count                     551
+  atr_at_setup                     531
+  dist_to_d1_open_pct              480
+  quality                          406
+  hour_of_day                      405
+  is_bullish                       361
+  atr_ratio_100                    352
+  minutes_into_killzone            343
+  vol_ratio_setup                  337
+  bars_group_to_validation         294
+  bars_sweep_to_validation         286
+  score                            271
+  has_breaker_kz                   198
+  sweep_strength                   189
+  has_po3_dist                     177
+  ob_group_size                    174
+  ob_strength                      138

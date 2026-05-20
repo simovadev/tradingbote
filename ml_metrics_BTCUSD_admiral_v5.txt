@@ -1,0 +1,33 @@
+=== BTCUSD V5 ===
+Source dataset : V5
+Total closed   : 120,461
+WR brut        : 33.0%
+AUC TEST       : 0.828
+  seuil=0.50 :  5312 trades, WR=66.3%
+  seuil=0.55 :  4373 trades, WR=68.8%
+  seuil=0.60 :  3430 trades, WR=71.8%
+  seuil=0.65 :  2577 trades, WR=74.0%
+  seuil=0.70 :  1844 trades, WR=75.1%
+  seuil=0.75 :  1167 trades, WR=78.1%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdl_pct                  798
+  dist_to_pdh_pct                  790
+  risk_points                      684
+  retest_count                     634
+  atr_at_setup                     541
+  is_bullish                       405
+  atr_ratio_100                    387
+  dist_to_d1_open_pct              382
+  bars_group_to_validation         357
+  quality                          346
+  vol_ratio_setup                  320
+  score                            319
+  minutes_into_killzone            310
+  bars_sweep_to_validation         279
+  hour_of_day                      259
+  ob_group_size                    198
+  has_breaker_kz                   190
+  sweep_strength                   187
+  has_po3_dist                     171
+  has_open_midnight_respect        142

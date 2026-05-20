@@ -1,0 +1,33 @@
+=== DJ30 V5 ===
+Source dataset : V5
+Total closed   : 109,722
+WR brut        : 30.2%
+AUC TEST       : 0.824
+  seuil=0.50 :  3432 trades, WR=64.7%
+  seuil=0.55 :  2606 trades, WR=68.1%
+  seuil=0.60 :  1875 trades, WR=71.9%
+  seuil=0.65 :  1284 trades, WR=74.8%
+  seuil=0.70 :   810 trades, WR=78.4%
+  seuil=0.75 :   468 trades, WR=82.5%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdh_pct                  831
+  dist_to_pdl_pct                  744
+  risk_points                      698
+  retest_count                     554
+  hour_of_day                      452
+  is_bullish                       396
+  atr_at_setup                     367
+  dist_to_d1_open_pct              349
+  score                            340
+  quality                          324
+  minutes_into_killzone            285
+  atr_ratio_100                    268
+  bars_group_to_validation         253
+  vol_ratio_setup                  251
+  bars_sweep_to_validation         234
+  has_breaker_kz                   184
+  ob_group_size                    184
+  sweep_strength                   180
+  has_po3_dist                     178
+  rr                               168

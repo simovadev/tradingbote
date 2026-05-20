@@ -1,0 +1,33 @@
+=== UK100 V5 ===
+Source dataset : V5
+Total closed   : 91,998
+WR brut        : 30.5%
+AUC TEST       : 0.820
+  seuil=0.50 :  2983 trades, WR=64.0%
+  seuil=0.55 :  2303 trades, WR=67.9%
+  seuil=0.60 :  1700 trades, WR=71.9%
+  seuil=0.65 :  1192 trades, WR=74.2%
+  seuil=0.70 :   784 trades, WR=78.6%
+  seuil=0.75 :   469 trades, WR=82.1%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdh_pct                  873
+  risk_points                      805
+  dist_to_pdl_pct                  706
+  retest_count                     522
+  atr_at_setup                     472
+  hour_of_day                      451
+  quality                          426
+  is_bullish                       380
+  dist_to_d1_open_pct              356
+  bars_group_to_validation         313
+  minutes_into_killzone            292
+  vol_ratio_setup                  269
+  bars_sweep_to_validation         249
+  score                            248
+  atr_ratio_100                    241
+  ob_group_size                    192
+  sweep_strength                   183
+  has_breaker_kz                   181
+  has_po3_dist                     156
+  ob_strength                      150

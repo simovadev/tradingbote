@@ -1,0 +1,33 @@
+=== GER40 V5 ===
+Source dataset : V5
+Total closed   : 62,442
+WR brut        : 32.9%
+AUC TEST       : 0.829
+  seuil=0.50 :  1826 trades, WR=68.1%
+  seuil=0.55 :  1470 trades, WR=70.3%
+  seuil=0.60 :  1140 trades, WR=71.8%
+  seuil=0.65 :   839 trades, WR=75.6%
+  seuil=0.70 :   583 trades, WR=79.8%
+  seuil=0.75 :   391 trades, WR=80.6%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdh_pct                  789
+  risk_points                      747
+  dist_to_pdl_pct                  703
+  retest_count                     537
+  atr_at_setup                     430
+  hour_of_day                      425
+  dist_to_d1_open_pct              377
+  is_bullish                       375
+  score                            357
+  quality                          347
+  atr_ratio_100                    324
+  vol_ratio_setup                  300
+  minutes_into_killzone            288
+  bars_group_to_validation         286
+  bars_sweep_to_validation         220
+  has_breaker_kz                   186
+  sweep_strength                   164
+  ob_group_size                    151
+  has_po3_dist                     150
+  has_open_midnight_respect        135

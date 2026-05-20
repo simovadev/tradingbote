@@ -64,24 +64,24 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
     ("NAS100", "M5"): Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_NAS100_M5.json"),
 }
 
-# V3.5 thresholds (user 2026-05-20) - calibre sur OOS 12 mois Admiral 8 ans
-# Strategie : seuil 0.70 minimum partout (WR >= 73% partout), montee 0.75 si
-# WR <75% au seuil 0.70.
+# V5 thresholds (user 2026-05-20) - calibre sur OOS 12 mois Admiral 8 ans
+# Strategie : seuil 0.75 partout (WR ~80%+ sur tous les actifs). User assume volume
+# eleve (~5-10 trades/jour/actif) en compensant par risque reduit.
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.55,  # TEST WR 73.0% @0.70, AUC 0.778
-    "NAS100": 0.55,  # TEST WR 76.3% @0.70, AUC 0.813
-    "GER40":  0.55,  # AUC 0.804
-    "BTCUSD": 0.55,  # TEST WR 73.8% @0.70, AUC 0.810
-    "EURUSD": 0.55,  # TEST WR 79.4% @0.70, AUC 0.808
-    "GBPUSD": 0.55,  # TEST WR 74.4% @0.70, AUC 0.804
-    "AUDUSD": 0.55,  # TEST WR 79.8% @0.70, AUC 0.811
-    "USDJPY": 0.55,  # TEST WR 75.0% @0.70, AUC 0.804
-    "SP500":  0.55,  # TEST WR 80.5% @0.70, AUC 0.801
-    "DJ30":   0.55,  # TEST WR 73.4% @0.70, AUC 0.792
-    "UK100":  0.55,  # TEST WR 72.8% @0.70, AUC 0.787
-    "FRA40":  0.55,  # TEST WR 75.1% @0.70, AUC 0.799
-    "USDCAD": 0.55,  # TEST WR 80.0% @0.70, AUC 0.786
-    "USDCHF": 0.55,  # TEST WR 77.7% @0.70, AUC 0.806
+    "XAUUSD": 0.75,  # V5 TEST WR 86.5% @0.75, AUC 0.818
+    "NAS100": 0.75,  # V5 TEST WR 79.7% @0.75, AUC 0.828
+    "GER40":  0.75,  # V5 TEST WR 80.6% @0.75, AUC 0.829
+    "BTCUSD": 0.75,  # V5 TEST WR 78.1% @0.75, AUC 0.828
+    "EURUSD": 0.75,  # V5 TEST WR 81.5% @0.75, AUC 0.836
+    "GBPUSD": 0.75,  # V5 TEST WR 80.1% @0.75, AUC 0.826
+    "AUDUSD": 0.75,  # V5 TEST WR 78.3% @0.75, AUC 0.829
+    "USDJPY": 0.75,  # V5 TEST WR 81.2% @0.75, AUC 0.825
+    "SP500":  0.75,  # V5 TEST WR 76.5% @0.75, AUC 0.819
+    "DJ30":   0.75,  # V5 TEST WR 82.5% @0.75, AUC 0.824
+    "UK100":  0.75,  # V5 TEST WR 82.1% @0.75, AUC 0.820
+    "FRA40":  0.75,  # V5 TEST WR 82.1% @0.75, AUC 0.827
+    "USDCAD": 0.75,  # V5 TEST WR 81.3% @0.75, AUC 0.826
+    "USDCHF": 0.75,  # V5 TEST WR 84.7% @0.75, AUC 0.828
     # JP225 desactive (ecart Duka/Vantage trop grand)
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
@@ -344,10 +344,11 @@ def predict_proba(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=No
 
 
 def get_dynamic_threshold(instrument: str, balance: float | None = None) -> float:
-    """Seuil ML (user 2026-05-20 : revert au seuil 0.70 fixe apres test).
+    """Seuil ML V5 (user 2026-05-20) : 0.75 partout (WR ~80% min, qualite maximale).
 
-    Strategie 0.55 sprint / 0.70 conso revertee : on garde 0.70 partout
-    pour qualite maximale (WR 73-80% sur OOS).
+    V5 modeles : AUC 0.819-0.836, WR @0.75 entre 76% et 87% sur OOS 12 mois.
+    User accepte volume reduit (cap par actif/jour gere en amont) pour
+    maximiser WR et reduire drawdown.
     """
     return ML_THRESHOLDS.get(instrument, DEFAULT_THRESHOLD)
 

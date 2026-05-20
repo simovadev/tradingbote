@@ -1,0 +1,33 @@
+=== USDJPY V5 ===
+Source dataset : V5
+Total closed   : 72,197
+WR brut        : 30.7%
+AUC TEST       : 0.825
+  seuil=0.50 :  2711 trades, WR=65.5%
+  seuil=0.55 :  2152 trades, WR=68.6%
+  seuil=0.60 :  1592 trades, WR=72.3%
+  seuil=0.65 :  1125 trades, WR=74.9%
+  seuil=0.70 :   705 trades, WR=78.0%
+  seuil=0.75 :   393 trades, WR=81.2%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  risk_points                      838
+  dist_to_pdh_pct                  818
+  dist_to_pdl_pct                  785
+  retest_count                     522
+  dist_to_d1_open_pct              450
+  atr_at_setup                     441
+  hour_of_day                      390
+  quality                          386
+  minutes_into_killzone            343
+  score                            334
+  is_bullish                       329
+  atr_ratio_100                    307
+  bars_sweep_to_validation         299
+  vol_ratio_setup                  276
+  bars_group_to_validation         263
+  sweep_strength                   193
+  rr                               192
+  ob_group_size                    178
+  has_breaker_kz                   165
+  has_po3_dist                     158

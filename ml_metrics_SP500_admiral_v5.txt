@@ -1,0 +1,33 @@
+=== SP500 V5 ===
+Source dataset : V5
+Total closed   : 70,723
+WR brut        : 31.0%
+AUC TEST       : 0.819
+  seuil=0.50 :  2511 trades, WR=65.2%
+  seuil=0.55 :  1942 trades, WR=68.3%
+  seuil=0.60 :  1432 trades, WR=71.4%
+  seuil=0.65 :  1015 trades, WR=73.2%
+  seuil=0.70 :   656 trades, WR=76.8%
+  seuil=0.75 :   375 trades, WR=76.5%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdl_pct                  806
+  dist_to_pdh_pct                  759
+  risk_points                      692
+  atr_at_setup                     474
+  retest_count                     472
+  dist_to_d1_open_pct              450
+  quality                          404
+  is_bullish                       393
+  hour_of_day                      382
+  score                            354
+  atr_ratio_100                    346
+  bars_group_to_validation         332
+  vol_ratio_setup                  330
+  minutes_into_killzone            312
+  bars_sweep_to_validation         270
+  rr                               207
+  sweep_strength                   192
+  has_po3_dist                     161
+  ob_group_size                    159
+  ob_strength                      157

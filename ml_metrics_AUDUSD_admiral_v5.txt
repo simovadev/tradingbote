@@ -1,0 +1,33 @@
+=== AUDUSD V5 ===
+Source dataset : V5
+Total closed   : 65,728
+WR brut        : 30.9%
+AUC TEST       : 0.829
+  seuil=0.50 :  2267 trades, WR=65.3%
+  seuil=0.55 :  1802 trades, WR=67.5%
+  seuil=0.60 :  1377 trades, WR=71.2%
+  seuil=0.65 :   995 trades, WR=74.4%
+  seuil=0.70 :   645 trades, WR=76.9%
+  seuil=0.75 :   350 trades, WR=78.3%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  risk_points                      641
+  dist_to_pdl_pct                  503
+  dist_to_pdh_pct                  477
+  retest_count                     464
+  hour_of_day                      280
+  atr_at_setup                     263
+  quality                          262
+  is_bullish                       253
+  dist_to_d1_open_pct              253
+  minutes_into_killzone            212
+  rr                               182
+  bars_group_to_validation         181
+  has_breaker_kz                   176
+  bars_sweep_to_validation         172
+  has_po3_dist                     165
+  atr_ratio_100                    164
+  ob_group_size                    156
+  score                            150
+  vol_ratio_setup                  147
+  has_open_midnight_respect        106

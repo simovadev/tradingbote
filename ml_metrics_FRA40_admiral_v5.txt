@@ -1,0 +1,33 @@
+=== FRA40 V5 ===
+Source dataset : V5
+Total closed   : 58,465
+WR brut        : 30.7%
+AUC TEST       : 0.827
+  seuil=0.50 :  2081 trades, WR=65.0%
+  seuil=0.55 :  1634 trades, WR=67.8%
+  seuil=0.60 :  1267 trades, WR=71.0%
+  seuil=0.65 :   876 trades, WR=76.3%
+  seuil=0.70 :   576 trades, WR=81.1%
+  seuil=0.75 :   358 trades, WR=82.1%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdl_pct                  727
+  risk_points                      720
+  dist_to_pdh_pct                  710
+  dist_to_d1_open_pct              523
+  atr_at_setup                     478
+  retest_count                     454
+  quality                          402
+  is_bullish                       378
+  score                            343
+  minutes_into_killzone            335
+  hour_of_day                      311
+  bars_group_to_validation         289
+  atr_ratio_100                    280
+  vol_ratio_setup                  253
+  bars_sweep_to_validation         246
+  has_breaker_kz                   185
+  rr                               182
+  ob_group_size                    173
+  sweep_strength                   160
+  ob_strength                      143

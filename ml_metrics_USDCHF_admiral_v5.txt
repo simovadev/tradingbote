@@ -1,0 +1,33 @@
+=== USDCHF V5 ===
+Source dataset : V5
+Total closed   : 77,092
+WR brut        : 29.2%
+AUC TEST       : 0.828
+  seuil=0.50 :  2460 trades, WR=65.1%
+  seuil=0.55 :  1879 trades, WR=68.6%
+  seuil=0.60 :  1429 trades, WR=72.0%
+  seuil=0.65 :   996 trades, WR=75.9%
+  seuil=0.70 :   621 trades, WR=80.8%
+  seuil=0.75 :   359 trades, WR=84.7%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  risk_points                      807
+  dist_to_pdh_pct                  790
+  dist_to_pdl_pct                  744
+  retest_count                     511
+  hour_of_day                      480
+  is_bullish                       423
+  atr_at_setup                     423
+  dist_to_d1_open_pct              382
+  quality                          368
+  minutes_into_killzone            364
+  score                            361
+  atr_ratio_100                    297
+  bars_group_to_validation         290
+  bars_sweep_to_validation         286
+  vol_ratio_setup                  267
+  has_breaker_kz                   196
+  ob_group_size                    189
+  has_po3_dist                     172
+  sweep_strength                   164
+  rr                               136

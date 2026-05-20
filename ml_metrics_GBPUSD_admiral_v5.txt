@@ -1,0 +1,33 @@
+=== GBPUSD V5 ===
+Source dataset : V5
+Total closed   : 75,648
+WR brut        : 30.9%
+AUC TEST       : 0.826
+  seuil=0.50 :  2612 trades, WR=66.0%
+  seuil=0.55 :  2069 trades, WR=69.7%
+  seuil=0.60 :  1597 trades, WR=73.2%
+  seuil=0.65 :  1192 trades, WR=76.8%
+  seuil=0.70 :   817 trades, WR=79.3%
+  seuil=0.75 :   478 trades, WR=80.1%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  risk_points                      957
+  dist_to_pdh_pct                  808
+  dist_to_pdl_pct                  714
+  hour_of_day                      555
+  retest_count                     508
+  atr_at_setup                     507
+  dist_to_d1_open_pct              471
+  quality                          389
+  is_bullish                       366
+  minutes_into_killzone            358
+  bars_group_to_validation         249
+  atr_ratio_100                    246
+  bars_sweep_to_validation         242
+  vol_ratio_setup                  236
+  score                            232
+  sweep_strength                   181
+  ob_group_size                    181
+  has_po3_dist                     164
+  rr                               161
+  has_breaker_kz                   151

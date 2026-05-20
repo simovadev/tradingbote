@@ -1,0 +1,33 @@
+=== EURUSD V5 ===
+Source dataset : V5
+Total closed   : 67,137
+WR brut        : 30.3%
+AUC TEST       : 0.836
+  seuil=0.50 :  2330 trades, WR=67.3%
+  seuil=0.55 :  1882 trades, WR=70.1%
+  seuil=0.60 :  1443 trades, WR=74.1%
+  seuil=0.65 :  1032 trades, WR=77.6%
+  seuil=0.70 :   710 trades, WR=78.2%
+  seuil=0.75 :   470 trades, WR=81.5%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  risk_points                      777
+  dist_to_pdl_pct                  755
+  dist_to_pdh_pct                  737
+  retest_count                     497
+  hour_of_day                      442
+  atr_at_setup                     417
+  dist_to_d1_open_pct              416
+  score                            343
+  minutes_into_killzone            334
+  quality                          324
+  is_bullish                       320
+  vol_ratio_setup                  301
+  atr_ratio_100                    273
+  bars_group_to_validation         243
+  bars_sweep_to_validation         234
+  rr                               176
+  ob_group_size                    172
+  has_po3_dist                     166
+  ob_strength                      158
+  sweep_strength                   140

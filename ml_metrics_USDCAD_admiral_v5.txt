@@ -1,0 +1,33 @@
+=== USDCAD V5 ===
+Source dataset : V5
+Total closed   : 82,395
+WR brut        : 28.5%
+AUC TEST       : 0.826
+  seuil=0.50 :  2097 trades, WR=63.9%
+  seuil=0.55 :  1641 trades, WR=67.4%
+  seuil=0.60 :  1192 trades, WR=70.9%
+  seuil=0.65 :   805 trades, WR=75.4%
+  seuil=0.70 :   531 trades, WR=79.5%
+  seuil=0.75 :   316 trades, WR=81.3%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  dist_to_pdl_pct                  770
+  dist_to_pdh_pct                  736
+  risk_points                      720
+  retest_count                     519
+  hour_of_day                      504
+  atr_at_setup                     481
+  quality                          447
+  minutes_into_killzone            393
+  dist_to_d1_open_pct              381
+  is_bullish                       344
+  score                            313
+  bars_group_to_validation         297
+  bars_sweep_to_validation         270
+  atr_ratio_100                    266
+  vol_ratio_setup                  256
+  ob_group_size                    181
+  sweep_strength                   173
+  has_po3_dist                     160
+  rr                               152
+  has_breaker_kz                   150

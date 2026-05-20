@@ -1,0 +1,33 @@
+=== XAUUSD V5 ===
+Source dataset : V5
+Total closed   : 114,006
+WR brut        : 29.2%
+AUC TEST       : 0.818
+  seuil=0.50 :  3252 trades, WR=65.4%
+  seuil=0.55 :  2425 trades, WR=68.7%
+  seuil=0.60 :  1716 trades, WR=72.2%
+  seuil=0.65 :  1075 trades, WR=75.2%
+  seuil=0.70 :   629 trades, WR=79.2%
+  seuil=0.75 :   312 trades, WR=86.5%
+
+=== TOP 20 FEATURES IMPORTANCE ===
+  risk_points                      886
+  dist_to_pdh_pct                  832
+  dist_to_pdl_pct                  768
+  retest_count                     552
+  is_bullish                       449
+  quality                          427
+  atr_at_setup                     416
+  dist_to_d1_open_pct              407
+  minutes_into_killzone            376
+  hour_of_day                      363
+  score                            315
+  vol_ratio_setup                  277
+  bars_group_to_validation         274
+  bars_sweep_to_validation         241
+  atr_ratio_100                    226
+  ob_group_size                    215
+  sweep_strength                   190
+  has_breaker_kz                   187
+  rr                               175
+  has_po3_dist                     155
