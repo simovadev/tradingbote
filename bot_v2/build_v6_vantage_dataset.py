@@ -40,12 +40,11 @@ ALL_ASSETS = [
     "USDCAD", "USDCHF",
 ]
 
-# V6.2 (2026-05-21) : utiliser TOUTE la data Vantage dispo (~7 mois).
-# Le split TRAIN/VAL/OOS se fera dans train_v6_vantage.py :
-#   TRAIN ~6 mois / VAL 15j / OOS 15j
-# Avant : TRAIN_END=2026-03-31 -> 0 trades en OOS car build coupait avant
-TRAIN_START = pd.Timestamp("2025-10-23", tz="UTC")
-TRAIN_END = pd.Timestamp("2026-05-19", tz="UTC")
+# V7 (2026-05-21) : data Vantage 8 ans (2018-03 -> 2026-05).
+# Le split TRAIN/VAL/OOS se fait dans train_v6_vantage.py :
+#   TRAIN 7 ans / VAL 6 mois / OOS 6 mois
+TRAIN_START = pd.Timestamp("2018-03-01", tz="UTC")
+TRAIN_END = pd.Timestamp("2026-05-21", tz="UTC")
 
 
 def build_one(asset: str):

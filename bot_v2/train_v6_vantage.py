@@ -41,15 +41,14 @@ ALL_ASSETS = [
     "USDCAD", "USDCHF",
 ]
 
-# V6.2 (2026-05-21) : split temporel 6 mois / 15j / 15j
-# Le dataset couvre 2025-10-23 -> 2026-05-19 (~6.9 mois Vantage).
-# 3 mois etait trop court (risque overfit) -> on monte le TRAIN a ~6 mois.
-#   TRAIN : 2025-10-23 -> 2026-04-18 (~5.85 mois = 175 jours)
-#   VAL   : 2026-04-19 -> 2026-05-03 (15 jours)
-#   OOS   : 2026-05-04 -> 2026-05-19 (15 jours, jamais vu en training)
-TRAIN_END = pd.Timestamp("2026-04-19", tz="UTC")
-VAL_END = pd.Timestamp("2026-05-04", tz="UTC")
-# OOS = >= 2026-05-04
+# V7 (2026-05-21) : split temporel 7 ans / 6 mois / 6 mois (8 ans Vantage)
+# Le dataset couvre ~2018-03 -> 2026-05-21.
+#   TRAIN : 2018-03 -> 2025-05-21 (~7.2 ans, 90% des trades)
+#   VAL   : 2025-05-22 -> 2025-11-21 (6 mois)
+#   OOS   : 2025-11-22 -> 2026-05-21 (6 mois, jamais vu en training)
+TRAIN_END = pd.Timestamp("2025-05-22", tz="UTC")
+VAL_END = pd.Timestamp("2025-11-22", tz="UTC")
+# OOS = >= 2025-11-22
 
 NON_FEATURES = {
     "instrument", "ts", "direction",
