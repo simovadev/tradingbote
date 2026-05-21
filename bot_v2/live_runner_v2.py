@@ -1816,34 +1816,40 @@ def run_live(test_dry_run: bool = False):
                         if (now - v).total_seconds() < 7200
                     }
 
-                # Stats periodiques (chaque ~5 min)
-                if int(time.time()) % 300 < SCAN_INTERVAL_SEC:
-                    stats = state.get_stats()
+                # V5.9 (2026-05-21) : Stats poussees a chaque cycle (~20s).
+                # Avant : int(time()) % 300 < SCAN_INTERVAL_SEC -> fenetre de 5s
+                # toutes les 5 min, ratee 95% du temps -> dashboard vide.
+                # Maintenant : 1 STATS par cycle, le dashboard voit la balance
+                # et les KPIs en quasi-temps reel.
+                stats = state.get_stats()
+                # Log INFO seulement toutes les ~5 min pour ne pas polluer
+                _log_now = (int(time.time()) % 300) < SCAN_INTERVAL_SEC
+                if _log_now:
                     log.info(
                         f"STATS | total={stats['total']} W={stats['wins']} L={stats['losses']} "
                         f"WR={stats['wr']:.1f}% PnL={stats['pnl_total']:+.2f}€ "
                         f"balance={balance:.2f}€"
                     )
-                    # V5.8 : push STATS vers le dashboard
+                # Push STATS vers le dashboard a CHAQUE cycle
+                try:
+                    _eq = None
                     try:
-                        _eq = None
-                        try:
-                            _eq = mt5_exec.get_equity()
-                        except Exception:
-                            pass
-                        PUSHER.push_stats(
-                            total=stats.get("total", 0),
-                            wins=stats.get("wins", 0),
-                            losses=stats.get("losses", 0),
-                            wr_pct=stats.get("wr", 0),
-                            pnl_total=stats.get("pnl_total", 0),
-                            balance=balance,
-                            equity=_eq,
-                            positions_open=n_open,
-                            pending_orders=n_pending,
-                        )
-                    except Exception as _pe:
-                        log.debug(f"push_stats fail: {_pe}")
+                        _eq = mt5_exec.get_equity()
+                    except Exception:
+                        pass
+                    PUSHER.push_stats(
+                        total=stats.get("total", 0),
+                        wins=stats.get("wins", 0),
+                        losses=stats.get("losses", 0),
+                        wr_pct=stats.get("wr", 0),
+                        pnl_total=stats.get("pnl_total", 0),
+                        balance=balance,
+                        equity=_eq,
+                        positions_open=n_open,
+                        pending_orders=n_pending,
+                    )
+                except Exception as _pe:
+                    log.debug(f"push_stats fail: {_pe}")
 
             except Exception as e:
                 log.exception(f"Erreur dans la boucle : {e}")
