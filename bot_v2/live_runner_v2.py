@@ -454,9 +454,25 @@ def compute_asset(payload: dict) -> dict:
 
             if r.verdict != "TRADE" or r.trade_setup is None:
                 reason = r.rejection_reason or "no_trade"
+                # V5.9c : enrichir le rejected_log avec les details OB et pipeline
+                # pour les afficher dans le dashboard (entry/SL/TP si dispo).
+                ts_ob = df_m1.index[ob.validation_index]
+                _entry = _sl = _tp = _rr = None
+                if r.trade_setup is not None:
+                    _entry = float(r.trade_setup.entry_price)
+                    _sl = float(r.trade_setup.stop_loss)
+                    _tp = float(r.trade_setup.take_profit)
+                    _rr = float(r.trade_setup.rr)
                 rejected_log.append((
-                    instrument, df_m1.index[ob.validation_index],
-                    ob.direction, reason, None, None,
+                    instrument, ts_ob, ob.direction, reason, None,
+                    int(r.score) if r.score is not None else None,
+                    # Champs additionnels (compat : les anciens listeners
+                    # n'utilisent que les 6 premiers via *entry)
+                    {
+                        "threshold": float(threshold),
+                        "entry": _entry, "sl": _sl, "tp": _tp, "rr": _rr,
+                        "ob_high": float(ob.ob_high), "ob_low": float(ob.ob_low),
+                    },
                 ))
                 diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
                 continue
@@ -467,9 +483,19 @@ def compute_asset(payload: dict) -> dict:
             )
             diag_ml_probas.append(proba)
             if proba < threshold:
+                ts_ob = df_m1.index[ob.validation_index]
+                _entry = float(r.trade_setup.entry_price)
+                _sl = float(r.trade_setup.stop_loss)
+                _tp = float(r.trade_setup.take_profit)
+                _rr = float(r.trade_setup.rr)
                 rejected_log.append((
-                    instrument, df_m1.index[ob.validation_index],
-                    ob.direction, f"ml_below_thr_{proba:.3f}", proba, r.score,
+                    instrument, ts_ob, ob.direction,
+                    f"ml_below_thr_{proba:.3f}", float(proba), int(r.score),
+                    {
+                        "threshold": float(threshold),
+                        "entry": _entry, "sl": _sl, "tp": _tp, "rr": _rr,
+                        "ob_high": float(ob.ob_high), "ob_low": float(ob.ob_low),
+                    },
                 ))
                 diag_reasons[f"ml_below_{threshold:.2f}"] = (
                     diag_reasons.get(f"ml_below_{threshold:.2f}", 0) + 1
@@ -1706,12 +1732,15 @@ def run_live(test_dry_run: bool = False):
                     for line in r["diag_log"]:
                         log.info(line)
                     for entry in r["rejected_log"]:
+                        # entry = (instrument, ts, direction, reason, ml_proba, score, extras_dict?)
+                        # SQLite log_rejected n'accepte que les 6 premiers.
                         try:
-                            state.log_rejected(*entry)
+                            state.log_rejected(*entry[:6])
                         except Exception:
                             pass
-                        # Batch pour le dashboard (entry = tuple type log_rejected)
+                        # Batch pour le dashboard avec extras (entry/SL/TP/RR/threshold)
                         try:
+                            _extras = entry[6] if len(entry) > 6 and isinstance(entry[6], dict) else {}
                             _cycle_rejected_batch.append({
                                 "instrument": entry[0],
                                 "ts": str(entry[1]),
@@ -1719,6 +1748,7 @@ def run_live(test_dry_run: bool = False):
                                 "reason": entry[3],
                                 "ml_proba": entry[4] if len(entry) > 4 else None,
                                 "score": entry[5] if len(entry) > 5 else None,
+                                **_extras,  # threshold, entry, sl, tp, rr, ob_high, ob_low
                             })
                         except Exception:
                             pass
