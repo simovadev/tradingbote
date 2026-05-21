@@ -1198,17 +1198,15 @@ def boot_diagnostics(mt5_exec: MT5Executor, state: LiveState):
         age = (utc_now - po["time_setup"]).total_seconds() / 60
         log.info(f"   PEND {po['symbol']} ticket={po['ticket']} age={age:.1f}min")
 
-    # === 6. SIMULATION RETROSPECTIVE 24h : qu'aurait fait le bot ?
+    # === 6 + 7. DIAGNOSTICS BOOT LOURDS — DESACTIVES (2026-05-21) ===
+    # simulate_last_24h() et debug_last_hour() rejouent le pipeline ICT sur
+    # 17 actifs x 88k bougies au demarrage. Sur le VPS Contabo (peu de cores,
+    # RAM limitee) ca saturait la RAM et crashait le bot avant le 1er cycle.
+    # Ces diagnostics sont purement informatifs -> on demarre direct sur le
+    # scan live. Pour analyser les 24h passees, lancer backtest_last_24h_local.py
+    # sur le PC local (machine plus puissante).
     log.info("=" * 70)
-    log.info("SIMULATION RETROSPECTIVE 24h - quels trades on aurait pris ?")
-    log.info("=" * 70)
-    simulate_last_24h(mt5_exec)
-
-    # === 7. DEBUG DETAILLE DERNIERE HEURE (chaque OB analyse) ===
-    debug_last_hour(mt5_exec)
-
-    log.info("=" * 70)
-    log.info("FIN BOOT DIAGNOSTICS")
+    log.info("BOOT : diagnostics retrospectifs desactives (VPS) -> scan live direct")
     log.info("=" * 70)
 
 
