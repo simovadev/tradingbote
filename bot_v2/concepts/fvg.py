@@ -64,70 +64,99 @@ def detect_fvg(df: pd.DataFrame) -> list[FVG]:
     if len(df) < 3:
         return []
 
+    import numpy as np
+    from bot_v2.concepts._fast import first_breach
+
     highs = df["high"].values
     lows = df["low"].values
     closes = df["close"].values
+    n = len(df)
+    timestamps = df.index
+
+    # OPTIM V5.6 (2026-05-21) : detection vectorisee des 3 bougies + recherche
+    # rebalance/inverse via first_breach (galloping). Avant : boucle interne
+    # `for j in range(i+2, n)` par FVG = O(N^2) sur 22k FVG (~4s sur 88k).
+    # Maintenant : pre-filtre suffixe + first_breach O(distance moyenne).
+    #
+    # Piege reproduit fidelement : dans l'original, rebalance ET inverse peuvent
+    # tomber sur la MEME bougie j (si lows[j]<=top ET closes[j]<bottom au meme
+    # tour -> inverse_idx = rebalance_idx). Donc inverse demarre a rebalance_idx
+    # INCLUS, pas +1.
+
+    # Detection des 3 bougies (vectorise, conditions identiques)
+    if n < 3:
+        return []
+    is_bull = lows[2:] > highs[:-2]      # centre i = position+1 dans le tableau full
+    is_bear = highs[2:] < lows[:-2]
+    bull_centers = np.flatnonzero(is_bull) + 1  # = i (1..n-2)
+    bear_centers = np.flatnonzero(is_bear) + 1
+
+    # Suffixes pour rejet O(1) des FVG jamais rebalances
+    suffix_min_low = np.minimum.accumulate(lows[::-1])[::-1]
+    suffix_max_high = np.maximum.accumulate(highs[::-1])[::-1]
+
+    # Construit la liste, ORDRE original = bullish puis bearish par i
+    # (le for i original ajoute bull d'abord, puis bear, donc tri par i,
+    # rank 0=bull, 1=bear). Un meme i ne peut PAS etre les deux a la fois
+    # (les conditions sont mutuellement exclusives), donc le tri simple par i
+    # avec bull avant bear est equivalent.
+    tagged = [(int(i), 0, "bullish") for i in bull_centers]
+    tagged += [(int(i), 1, "bearish") for i in bear_centers]
+    tagged.sort(key=lambda t: (t[0], t[1]))
 
     fvgs: list[FVG] = []
-
-    for i in range(1, len(df) - 1):
-        # Bullish : low du future > high du passe
-        if lows[i + 1] > highs[i - 1]:
+    for i, _r, direction in tagged:
+        if direction == "bullish":
             top = float(lows[i + 1])
             bottom = float(highs[i - 1])
-            # Cherche si rebalance plus tard
-            rebalanced = False
-            rebalance_idx = None
-            inversed = False
-            inverse_idx = None
-            for j in range(i + 2, len(df)):
-                # Rebalance : low de la bougie j entre dans la fenetre
-                if not rebalanced and lows[j] <= top:
-                    rebalanced = True
-                    rebalance_idx = j
-                # Inverse : cloture sous le bottom (corps, pas meche)
-                if rebalanced and closes[j] < bottom:
-                    inversed = True
-                    inverse_idx = j
-                    break
+            # Rebalance : 1er j >= i+2 avec lows[j] <= top (non-strict)
+            start = i + 2
+            if start >= n or suffix_min_low[start] > top:
+                rebalance_idx = -1
+            else:
+                rebalance_idx = first_breach(lows, start, top, np.less_equal)
+            if rebalance_idx < 0:
+                fvgs.append(FVG(
+                    direction="bullish", center_index=i, center_ts=timestamps[i],
+                    top=top, bottom=bottom,
+                    rebalanced=False, rebalance_index=None,
+                    inversed=False, inverse_index=None,
+                ))
+                continue
+            # Inverse : 1er j >= rebalance_idx (INCLUS) avec closes[j] < bottom (strict)
+            inverse_idx = first_breach(closes, rebalance_idx, bottom, np.less)
             fvgs.append(FVG(
-                direction="bullish",
-                center_index=i,
-                center_ts=df.index[i],
-                top=top,
-                bottom=bottom,
-                rebalanced=rebalanced,
-                rebalance_index=rebalance_idx,
-                inversed=inversed,
-                inverse_index=inverse_idx,
+                direction="bullish", center_index=i, center_ts=timestamps[i],
+                top=top, bottom=bottom,
+                rebalanced=True, rebalance_index=rebalance_idx,
+                inversed=(inverse_idx >= 0),
+                inverse_index=(inverse_idx if inverse_idx >= 0 else None),
             ))
-
-        # Bearish : high du future < low du passe
-        if highs[i + 1] < lows[i - 1]:
+        else:  # bearish
             top = float(lows[i - 1])
             bottom = float(highs[i + 1])
-            rebalanced = False
-            rebalance_idx = None
-            inversed = False
-            inverse_idx = None
-            for j in range(i + 2, len(df)):
-                if not rebalanced and highs[j] >= bottom:
-                    rebalanced = True
-                    rebalance_idx = j
-                if rebalanced and closes[j] > top:
-                    inversed = True
-                    inverse_idx = j
-                    break
+            # Rebalance : 1er j >= i+2 avec highs[j] >= bottom (non-strict)
+            start = i + 2
+            if start >= n or suffix_max_high[start] < bottom:
+                rebalance_idx = -1
+            else:
+                rebalance_idx = first_breach(highs, start, bottom, np.greater_equal)
+            if rebalance_idx < 0:
+                fvgs.append(FVG(
+                    direction="bearish", center_index=i, center_ts=timestamps[i],
+                    top=top, bottom=bottom,
+                    rebalanced=False, rebalance_index=None,
+                    inversed=False, inverse_index=None,
+                ))
+                continue
+            # Inverse : 1er j >= rebalance_idx (INCLUS) avec closes[j] > top (strict)
+            inverse_idx = first_breach(closes, rebalance_idx, top, np.greater)
             fvgs.append(FVG(
-                direction="bearish",
-                center_index=i,
-                center_ts=df.index[i],
-                top=top,
-                bottom=bottom,
-                rebalanced=rebalanced,
-                rebalance_index=rebalance_idx,
-                inversed=inversed,
-                inverse_index=inverse_idx,
+                direction="bearish", center_index=i, center_ts=timestamps[i],
+                top=top, bottom=bottom,
+                rebalanced=True, rebalance_index=rebalance_idx,
+                inversed=(inverse_idx >= 0),
+                inverse_index=(inverse_idx if inverse_idx >= 0 else None),
             ))
 
     return fvgs

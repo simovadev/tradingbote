@@ -75,6 +75,26 @@ def _has_displacement(df: pd.DataFrame, inv_idx: int, direction: Direction) -> b
     return move > 1.5 * atr
 
 
+def _has_displacement_fast(highs, lows, inv_idx: int, n: int) -> bool:
+    """Version vectorisee de _has_displacement : opere sur arrays numpy.
+
+    Pour rester BIT-IDENTIQUE a _has_displacement, on garde le meme ordre de
+    sommation (pandas Series.mean()) au lieu de numpy.mean() qui peut differer
+    d'un ULP et basculer un move > 1.5*atr a la limite.
+    Le param `direction` original n'etait pas utilise dans le corps, on l'omet.
+    """
+    if inv_idx < 14 or inv_idx >= n - 1:
+        return False
+    # Reproduction exacte de l'original : pd.Series.mean() sur la difference
+    # high-low de 14 bougies.
+    hl = pd.Series(highs[inv_idx - 14:inv_idx] - lows[inv_idx - 14:inv_idx])
+    atr = float(hl.mean())
+    if atr == 0:
+        return False
+    move = float(highs[inv_idx] - lows[inv_idx])
+    return move > 1.5 * atr
+
+
 def detect_breakers(
     df: pd.DataFrame,
     obs: list[OrderBlock] | None = None,
@@ -94,10 +114,22 @@ def detect_breakers(
     if not obs:
         return []
 
+    import numpy as np
+    from bot_v2.concepts._fast import first_breach
+
     closes = df["close"].values
+    highs = df["high"].values
+    lows = df["low"].values
     timestamps = df.index
     n = len(df)
     breakers: list[Breaker] = []
+
+    # OPTIM V5.6 (2026-05-21) : suffixe min/max sur CLOSES (pas highs/lows !)
+    # pour rejet O(1) des OB jamais inverses. Avant : closes[start_idx:] < ob_low
+    # materialisait toute la queue par OB = O(N^2). Maintenant : O(1) reject +
+    # first_breach galloping.
+    suffix_min_close = np.minimum.accumulate(closes[::-1])[::-1]
+    suffix_max_close = np.maximum.accumulate(closes[::-1])[::-1]
 
     for ob in obs:
         start_idx = ob.validation_index + 1
@@ -105,19 +137,23 @@ def detect_breakers(
             continue
 
         if ob.direction == "bullish":
-            mask = closes[start_idx:] < ob.ob_low
+            # Cherche close < ob_low (strict)
+            if suffix_min_close[start_idx] >= ob.ob_low:
+                continue
+            j = first_breach(closes, start_idx, ob.ob_low, np.less)
         else:
-            mask = closes[start_idx:] > ob.ob_high
+            if suffix_max_close[start_idx] <= ob.ob_high:
+                continue
+            j = first_breach(closes, start_idx, ob.ob_high, np.greater)
 
-        if not mask.any():
+        if j < 0:
             continue
-        j = start_idx + int(mask.argmax())
 
         if ob.direction == "bullish":
-            disp = _has_displacement(df, j, "bearish")
+            disp = _has_displacement_fast(highs, lows, j, n)
             breaker_dir = "bearish"
         else:
-            disp = _has_displacement(df, j, "bullish")
+            disp = _has_displacement_fast(highs, lows, j, n)
             breaker_dir = "bullish"
 
         breakers.append(Breaker(

@@ -62,34 +62,42 @@ def find_swings(df: pd.DataFrame, strength: int = 2) -> list[Swing]:
     highs = df["high"].values
     lows = df["low"].values
     n = len(df)
-    swings: list[Swing] = []
+    s = strength
 
-    for i in range(strength, n - strength):
-        # Swing high : high[i] > all highs des `strength` bougies de chaque cote
-        left_highs = highs[i - strength:i]
-        right_highs = highs[i + 1:i + 1 + strength]
-        if highs[i] > left_highs.max() and highs[i] > right_highs.max():
-            swings.append(Swing(
-                kind="high",
-                index=i,
-                timestamp=df.index[i],
-                price=float(highs[i]),
-                strength=strength,
-            ))
+    # OPTIM V5.6 (2026-05-21) : vectorisation via sliding_window_view.
+    # Avant : boucle Python 88k iterations x slices .max()/.min() pandas (~0.8s).
+    # Maintenant : 4 passes numpy vectorisees (~0.05s).
+    if n < 2 * s + 1:
+        return []
 
-        # Swing low : symetrique
-        left_lows = lows[i - strength:i]
-        right_lows = lows[i + 1:i + 1 + strength]
-        if lows[i] < left_lows.min() and lows[i] < right_lows.min():
-            swings.append(Swing(
-                kind="low",
-                index=i,
-                timestamp=df.index[i],
-                price=float(lows[i]),
-                strength=strength,
-            ))
+    import numpy as np
+    from numpy.lib.stride_tricks import sliding_window_view
 
-    return sorted(swings, key=lambda s: s.index)
+    win_h = sliding_window_view(highs, 2 * s + 1)  # shape (n-2s, 2s+1)
+    win_l = sliding_window_view(lows, 2 * s + 1)
+    center_h = win_h[:, s]
+    center_l = win_l[:, s]
+    # Strict (>) pour high, strict (<) pour low — identique a l'original.
+    left_max_h = win_h[:, :s].max(axis=1)
+    right_max_h = win_h[:, s + 1:].max(axis=1)
+    left_min_l = win_l[:, :s].min(axis=1)
+    right_min_l = win_l[:, s + 1:].min(axis=1)
+    is_high = (center_h > left_max_h) & (center_h > right_max_h)
+    is_low = (center_l < left_min_l) & (center_l < right_min_l)
+    idx_high = np.flatnonzero(is_high) + s  # decalage fenetre -> index global
+    idx_low = np.flatnonzero(is_low) + s
+
+    # ORDRE EXACT a reproduire (original) : a chaque i, on append high PUIS
+    # low, puis sorted(key=index) stable. Un meme i peut etre les deux (rare).
+    # On tag rank=0 pour high, rank=1 pour low -> sort par (index, rank) reproduit.
+    timestamps = df.index
+    tagged = [(int(i), 0, "high", float(highs[i])) for i in idx_high]
+    tagged += [(int(i), 1, "low", float(lows[i])) for i in idx_low]
+    tagged.sort(key=lambda t: (t[0], t[1]))
+    return [
+        Swing(kind=k, index=i, timestamp=timestamps[i], price=p, strength=s)
+        for (i, _r, k, p) in tagged
+    ]
 
 
 def find_sweeps(
@@ -114,6 +122,7 @@ def find_sweeps(
     if not swings:
         return []
     import numpy as np
+    from bot_v2.concepts._fast import first_breach
 
     highs = df["high"].values
     lows = df["low"].values
@@ -130,19 +139,26 @@ def find_sweeps(
     else:
         atr_arr = None
 
+    # OPTIM V5.6 (2026-05-21) : suffixe max/min pour rejet O(1) des swings
+    # jamais sweepes. Avant : `arr[start:] > price` par swing materialisait
+    # toute la queue (~88k floats) -> O(N^2) sur 23k swings. Maintenant :
+    # check suffixe O(1) + first_breach galloping pour les sweepes (sweep
+    # arrive tot apres swing -> 1-2 fenetres suffisent).
+    suffix_max_high = np.maximum.accumulate(highs[::-1])[::-1]
+    suffix_min_low = np.minimum.accumulate(lows[::-1])[::-1]
+
     for sw in swings:
         start_idx = sw.index + 1
         if start_idx >= n:
             continue
 
         if sw.kind == "high":
-            # 1ere bougie ou high > swing.price
-            # np.argmax retourne 0 si AUCUN True (donc on check after)
-            mask_breach = highs[start_idx:] > sw.price
-            if not mask_breach.any():
+            # Rejet O(1) : si max futur <= swing.price, jamais sweepe (strict >)
+            if suffix_max_high[start_idx] <= sw.price:
                 continue
-            j_rel = int(mask_breach.argmax())
-            j = start_idx + j_rel
+            j = first_breach(highs, start_idx, sw.price, np.greater)
+            if j < 0:
+                continue
             # Verifie rejet (close < swing.price)
             if closes[j] < sw.price:
                 if min_depth_atr > 0 and atr_arr is not None:
@@ -158,11 +174,11 @@ def find_sweeps(
                     direction="bearish",
                 ))
         else:
-            mask_breach = lows[start_idx:] < sw.price
-            if not mask_breach.any():
+            if suffix_min_low[start_idx] >= sw.price:
                 continue
-            j_rel = int(mask_breach.argmax())
-            j = start_idx + j_rel
+            j = first_breach(lows, start_idx, sw.price, np.less)
+            if j < 0:
+                continue
             if closes[j] > sw.price:
                 if min_depth_atr > 0 and atr_arr is not None:
                     atr = atr_arr[j]
