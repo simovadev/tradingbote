@@ -64,25 +64,41 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
     ("NAS100", "M5"): Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_NAS100_M5.json"),
 }
 
-# V8 thresholds (user 2026-05-21) - seuil 0.70 partout.
-# Calibre sur OOS V8 6 mois (14 actifs, sans data leakage) :
-#   seuil 0.70 -> WR global 77.3%, ~23 trades/jour sur les 14 actifs.
-# Choix user : bon compromis volume / qualite (WR 77%).
+# V9 thresholds (user 2026-05-22) - seuil OPTIMISE PAR ACTIF.
+# Calibre sur OOS V9 6 mois (2025-11-22 -> 2026-05-21), modeles sans data leakage.
+# Critere : viser ~1 trade/h tous actifs confondus (~30 trades/mois/actif),
+# WR plancher 60%, en maximisant le WR. Resultat : 304 trades/mois total, WR moy ~76%.
+# Voir tools/optimize_thresholds_v9.py et ml_thresholds_v9_optimal.json.
+#   Asset   seuil  trades/mois  WR
+#   XAUUSD  0.70   19.2         70.2%
+#   NAS100  0.70   23.6         74.3%
+#   GER40   0.75   15.3         78.0%
+#   BTCUSD  0.65   26.8         74.5%
+#   EURUSD  0.65   27.5         82.2%
+#   GBPUSD  0.65   25.1         73.8%
+#   AUDUSD  0.60   22.4         78.2%
+#   USDJPY  0.65   16.5         80.6%
+#   SP500   0.65   30.0         64.6%
+#   DJ30    0.75   12.1         90.3%
+#   UK100   0.65   13.7         77.8%
+#   FRA40   0.60   32.2         65.4%
+#   USDCAD  0.65   18.4         79.8%
+#   USDCHF  0.60   21.2         85.7%
 ML_THRESHOLDS: dict[str, float] = {
     "XAUUSD": 0.70,
     "NAS100": 0.70,
-    "GER40":  0.70,
-    "BTCUSD": 0.70,
-    "EURUSD": 0.70,
-    "GBPUSD": 0.70,
-    "AUDUSD": 0.70,
-    "USDJPY": 0.70,
-    "SP500":  0.70,
-    "DJ30":   0.70,
-    "UK100":  0.70,
-    "FRA40":  0.70,
-    "USDCAD": 0.70,
-    "USDCHF": 0.70,
+    "GER40":  0.75,
+    "BTCUSD": 0.65,
+    "EURUSD": 0.65,
+    "GBPUSD": 0.65,
+    "AUDUSD": 0.60,
+    "USDJPY": 0.65,
+    "SP500":  0.65,
+    "DJ30":   0.75,
+    "UK100":  0.65,
+    "FRA40":  0.60,
+    "USDCAD": 0.65,
+    "USDCHF": 0.60,
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {
