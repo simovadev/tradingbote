@@ -1550,14 +1550,42 @@ def run_live(test_dry_run: bool = False):
     """
     # Log path relatif au repertoire du script (compat PC dev + VPS prod)
     log_path = Path(__file__).resolve().parent.parent / "live.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(str(log_path)),
-            logging.StreamHandler(),
-        ],
-    )
+
+    # V7.1 (2026-05-21) : logging optimise pour live.
+    # - Fichier live.log : tout en INFO (debug complet conserve)
+    # - Console : uniquement les messages IMPORTANTS (filtre custom) +
+    #   tout ce qui est WARNING/ERROR. Reduit RAM/IO et garde le terminal
+    #   lisible.
+    #
+    # Pour voir TOUS les logs en temps reel -> python tools/view_logs.py
+    log.setLevel(logging.INFO)
+
+    # File handler : full INFO
+    fh = logging.FileHandler(str(log_path), mode="a", encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    log.addHandler(fh)
+
+    # Console handler : WARNING+ par defaut, MAIS on laisse passer les
+    # lignes importantes (CYCLE scan, SETUP, TRADE, balance, STATS) en INFO.
+    class _ImportantOnlyFilter(logging.Filter):
+        IMPORTANT_PREFIXES = (
+            "BOT LIVE DEMARRAGE", "MT5 connecte", "Cash reel", "ProcessPool",
+            "Buffers initialises", "DashboardPusher",
+            "CYCLE scan", "SETUP ", "PENDING ORDER", "TRADE CLOSED",
+            "STATS |", "Bot arrete", "Modele",
+        )
+        def filter(self, record: logging.LogRecord) -> bool:
+            if record.levelno >= logging.WARNING:
+                return True
+            msg = record.getMessage()
+            return any(msg.startswith(p) for p in self.IMPORTANT_PREFIXES)
+
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.addFilter(_ImportantOnlyFilter())
+    ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    log.addHandler(ch)
     log.info("=" * 60)
     log.info("BOT LIVE DEMARRAGE")
     log.info("=" * 60)
