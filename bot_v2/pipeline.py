@@ -162,12 +162,15 @@ def evaluate_ob(
 
     # ========== 2. KILLZONE (decision user 2026-05-16 : KZ devient SCORE, pas FILTRE) ==========
     # Exception FOREX (user 2026-05-17) : blocage 21h-02h NY (overnight US, volatilite plate).
+    # Exception USDJPY (user 2026-05-21) : paire japonaise, tres active pendant la
+    # session Asia (Tokyo). On la laisse tradable 24/24.
     kz = killzone_at(ob.validation_ts)
     res.killzone_name = kz
     is_forex = get_param(instrument, "is_forex", False)
 
-    # Forex : blocage horaire NY 21h-02h (volatilite morte)
-    if is_forex:
+    # Forex : blocage horaire NY 21h-02h (volatilite morte).
+    # USDJPY exclu : la paire JPY est active en Asia.
+    if is_forex and instrument != "USDJPY":
         from bot_v2.concepts.killzones import to_ny_time
         ny_ts = to_ny_time(ob.validation_ts)
         ny_hour = ny_ts.hour
