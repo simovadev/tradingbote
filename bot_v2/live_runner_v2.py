@@ -199,7 +199,316 @@ def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, m
     return float(model.predict_proba(X)[0, 1])
 
 
-# ========== PIPELINE PAR ACTIF ==========
+# ========== PIPELINE PAR ACTIF (split fetch / compute pour ProcessPool) ==========
+
+
+def fetch_payload(
+    mt5_exec: MT5Executor, instrument: str, balance: float | None, debug_diag: bool,
+) -> dict | None:
+    """V5.7 (2026-05-21) : phase FETCH (process principal).
+
+    Recupere les bougies M1/M15/H1/H4/D1 + les correles SMT. Construit un
+    dict picklable a envoyer aux workers ProcessPool. AUCUN calcul ICT ici.
+
+    Retourne None si les donnees sont insuffisantes (skip cet actif).
+    """
+    buffer = DATA_BUFFERS.get(instrument)
+    if buffer is None:
+        # Fallback : fetch direct MT5 (max 80k) - utile si parquet manquant.
+        log.warning(f"DIAG {instrument}: pas de buffer, fallback fetch MT5")
+        df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1, force_sync=True)
+        if df_m1 is None or len(df_m1) < 200:
+            return None
+        df_m1 = df_m1.iloc[:-1]
+        df_m15 = mt5_exec.get_bars(instrument, "M15", N_BARS_M15)
+        df_h1 = mt5_exec.get_bars(instrument, "H1", N_BARS_H1)
+        if df_m15 is None or df_h1 is None:
+            return None
+        df_m15 = df_m15.iloc[:-1]
+        df_h1 = df_h1.iloc[:-1]
+        try:
+            df_d1 = mt5_exec.get_bars(instrument, "D1", N_BARS_D1)
+            if df_d1 is None or len(df_d1) < 10:
+                raise ValueError
+        except Exception:
+            df_d1 = build_d1_from_h1(df_h1)
+        try:
+            df_h4 = mt5_exec.get_bars(instrument, "H4", 500)
+        except Exception:
+            df_h4 = None
+    else:
+        n_new = buffer.update()
+        if debug_diag and n_new > 0:
+            log.info(f"BUFFER {instrument}: +{n_new} nouvelles M1")
+        df_m1 = buffer.get_m1(n=N_BARS_M1)
+        if df_m1 is None or len(df_m1) < 200:
+            return None
+        df_m1 = df_m1.iloc[:-1]
+        df_m15 = buffer.get_m15(n=N_BARS_M15)
+        df_h1 = buffer.get_h1(n=N_BARS_H1)
+        df_h4 = buffer.get_h4(n=500)
+        df_d1 = buffer.get_d1(n=N_BARS_D1)
+        if df_d1 is None or len(df_d1) < 10:
+            df_d1 = build_d1_from_h1(df_h1)
+
+    # SMT correles (depuis buffer si dispo)
+    correlated_dfs: dict[str, tuple[pd.DataFrame, str]] = {}
+    for corr_name, corr_type in SMT_PAIRS.get(instrument, []):
+        corr_buffer = DATA_BUFFERS.get(corr_name)
+        try:
+            if corr_buffer is not None:
+                df_c = corr_buffer.get_m1(n=N_BARS_M1)
+            else:
+                df_c = mt5_exec.get_bars(corr_name, "M1", N_BARS_M1)
+            if df_c is not None and len(df_c) > 0:
+                correlated_dfs[corr_name] = (df_c, corr_type)
+        except Exception:
+            continue
+
+    return {
+        "instrument": instrument,
+        "balance": balance,
+        "debug_diag": debug_diag,
+        "df_m1": df_m1,
+        "df_m15": df_m15,
+        "df_h1": df_h1,
+        "df_h4": df_h4,
+        "df_d1": df_d1,
+        "correlated_dfs": correlated_dfs,
+    }
+
+
+def compute_asset(payload: dict) -> dict:
+    """V5.7 (2026-05-21) : phase COMPUTE (workers ProcessPool).
+
+    Reproduit fidelement la logique de scan_asset() a partir de la detection
+    OB+MSS. Aucun acces MT5 / DATA_BUFFERS / state — tout vient du payload.
+
+    Returns:
+        Dict picklable : {instrument, setups, rejected_log, diag_log, latency_ms,
+        error}. setups = liste de dicts (instrument, ts, ob, r, proba, df_m1).
+    """
+    import time as _time
+    _scan_start = _time.time()
+
+    instrument = payload["instrument"]
+    df_m1 = payload["df_m1"]
+    df_m15 = payload["df_m15"]
+    df_h1 = payload["df_h1"]
+    df_h4 = payload["df_h4"]
+    df_d1 = payload["df_d1"]
+    correlated_dfs = payload["correlated_dfs"]
+    balance = payload["balance"]
+    debug_diag = payload["debug_diag"]
+
+    diag_log: list[str] = []
+    rejected_log: list[tuple] = []
+
+    try:
+        # HTF swings (D1, H4, H1)
+        htf_dfs: dict[str, pd.DataFrame] = {"H1": df_h1, "D1": df_d1}
+        if df_h4 is not None and len(df_h4) > 0:
+            htf_dfs["H4"] = df_h4
+        htf_swings = collect_htf_swings(htf_dfs, swing_strength=3)
+
+        # Detection OB+MSS
+        _t = _time.time()
+        sws = get_param(instrument, "swing_strength_m1", 2)
+        obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+        cache = {
+            "swings_ltf": find_swings(df_m1, strength=sws),
+            "fvgs_ltf": detect_fvg(df_m1),
+            "breakers_ltf": detect_breakers(df_m1),
+            "obs_htf": detect_order_blocks(df_m15),
+        }
+        cache["structure_breaks"] = detect_structure_breaks(
+            df_m1, swings=cache["swings_ltf"], fvgs=cache["fvgs_ltf"]
+        )
+        cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
+        cache["obs_htf2"] = detect_order_blocks(df_h1)
+        cache_build_s = _time.time() - _t
+
+        mss_setups = detect_mss_setups(
+            df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"],
+            fvgs=cache["fvgs_ltf"],
+        )
+        # V5.1 : virer filtre dur confirm_ob_with_mss (le ML decide via has_mss_nearby).
+        obs_confirmed = obs
+
+        # Filtre : OB EN DIRECT (recent_cutoff 3min)
+        now = df_m1.index[-1]
+        recent_cutoff = now - pd.Timedelta(minutes=3)
+        obs_recent = [
+            ob for ob in obs_confirmed
+            if df_m1.index[ob.validation_index] >= recent_cutoff
+        ]
+
+        if debug_diag:
+            from bot_v2.concepts.killzones import killzone_at
+            last_ts = df_m1.index[-1]
+            latest_ob_ts = "aucun"
+            if obs_confirmed:
+                latest_ob_ts = df_m1.index[max(ob.validation_index for ob in obs_confirmed)]
+            kz_now = killzone_at(last_ts) or "AUCUNE"
+            cutoff_60 = last_ts - pd.Timedelta(minutes=60)
+            cutoff_15 = last_ts - pd.Timedelta(minutes=15)
+            n_obs_60min = sum(
+                1 for ob in obs_confirmed
+                if df_m1.index[ob.validation_index] >= cutoff_60
+            )
+            n_obs_15min = sum(
+                1 for ob in obs_confirmed
+                if df_m1.index[ob.validation_index] >= cutoff_15
+            )
+            diag_log.append(
+                f"DIAG {instrument}: M1={len(df_m1)} M15={len(df_m15)} H1={len(df_h1)} "
+                f"last_bar={last_ts} kz={kz_now} | OB_brut={len(obs)} OB+MSS={len(obs_confirmed)} "
+                f"latest_OB_MSS_ts={latest_ob_ts} OB_60min={n_obs_60min} OB_15min={n_obs_15min} "
+                f"OB_cutoff={len(obs_recent)}"
+            )
+
+            # Diag detaille des OB 15min (pour comprendre pourquoi pas trade)
+            obs_15min = [
+                ob for ob in obs_confirmed
+                if df_m1.index[ob.validation_index] >= cutoff_15
+            ]
+            if obs_15min:
+                loaded_diag = load_model(instrument)
+                if loaded_diag is not None:
+                    model_d, features_d = loaded_diag
+                    thr_d = ml_filter.get_dynamic_threshold(instrument, balance)
+                    for ob in obs_15min:
+                        obts = df_m1.index[ob.validation_index]
+                        age_min = (last_ts - obts).total_seconds() / 60
+                        try:
+                            r_d = evaluate_ob(
+                                ob, df_m1, df_m15, df_d1, instrument,
+                                ltf_name="M1", htf_name="M15",
+                                df_htf2=df_h1, htf2_name="H1",
+                                correlated_dfs=correlated_dfs,
+                                htf_swings=htf_swings,
+                                df_h1=df_h1, min_score=0, min_quality=0,
+                                cache=cache,
+                            )
+                            if r_d.verdict == "TRADE" and r_d.trade_setup is not None:
+                                proba_d = predict_proba(
+                                    model_d, features_d, r_d, ob, instrument,
+                                    df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups,
+                                )
+                                verdict_d = (
+                                    f"TRADE ml={proba_d:.3f} "
+                                    f"{'OK' if proba_d >= thr_d else f'<{thr_d}'}"
+                                )
+                            else:
+                                verdict_d = f"REJET: {(r_d.rejection_reason or 'no_trade')[:40]}"
+                        except Exception as e:
+                            verdict_d = f"EXCEPTION: {str(e)[:30]}"
+                        diag_log.append(
+                            f"  DIAG {instrument} 15min OB | ts={obts} age={age_min:.1f}min | {verdict_d}"
+                        )
+
+        if not obs_recent:
+            _scan_total = _time.time() - _scan_start
+            diag_log.append(
+                f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | cache_build={cache_build_s*1000:.0f}ms"
+            )
+            return {
+                "instrument": instrument, "setups": [], "rejected_log": rejected_log,
+                "diag_log": diag_log, "latency_ms": int(_scan_total * 1000), "error": None,
+            }
+
+        # Pipeline Vizion + ML
+        loaded = load_model(instrument)
+        if loaded is None:
+            return {
+                "instrument": instrument, "setups": [], "rejected_log": rejected_log,
+                "diag_log": diag_log, "latency_ms": 0, "error": None,
+            }
+        model, features = loaded
+        threshold = ml_filter.get_dynamic_threshold(instrument, balance)
+
+        valid_setups: list[dict] = []
+        diag_reasons: dict[str, int] = {}
+        diag_ml_probas: list[float] = []
+        for ob in obs_recent:
+            try:
+                r = evaluate_ob(
+                    ob, df_m1, df_m15, df_d1, instrument,
+                    ltf_name="M1", htf_name="M15",
+                    df_htf2=df_h1, htf2_name="H1",
+                    correlated_dfs=correlated_dfs,
+                    htf_swings=htf_swings,
+                    df_h1=df_h1, min_score=0, min_quality=0,
+                    cache=cache,
+                )
+            except Exception as e:
+                diag_reasons["evaluate_ob_exception"] = (
+                    diag_reasons.get("evaluate_ob_exception", 0) + 1
+                )
+                continue
+
+            if r.verdict != "TRADE" or r.trade_setup is None:
+                reason = r.rejection_reason or "no_trade"
+                rejected_log.append((
+                    instrument, df_m1.index[ob.validation_index],
+                    ob.direction, reason, None, None,
+                ))
+                diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
+                continue
+
+            proba = predict_proba(
+                model, features, r, ob, instrument,
+                df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups,
+            )
+            diag_ml_probas.append(proba)
+            if proba < threshold:
+                rejected_log.append((
+                    instrument, df_m1.index[ob.validation_index],
+                    ob.direction, f"ml_below_thr_{proba:.3f}", proba, r.score,
+                ))
+                diag_reasons[f"ml_below_{threshold:.2f}"] = (
+                    diag_reasons.get(f"ml_below_{threshold:.2f}", 0) + 1
+                )
+                continue
+
+            valid_setups.append({
+                "instrument": instrument,
+                "ts": df_m1.index[ob.validation_index],
+                "ob": ob,
+                "r": r,
+                "proba": proba,
+                "df_m1": df_m1,
+            })
+
+        if debug_diag and (diag_reasons or diag_ml_probas):
+            proba_summary = ""
+            if diag_ml_probas:
+                proba_summary = (
+                    f" | probas_ML={[f'{p:.3f}' for p in diag_ml_probas]} "
+                    f"(seuil={threshold:.2f})"
+                )
+            diag_log.append(
+                f"DIAG {instrument}: rejets = "
+                f"{dict(sorted(diag_reasons.items(), key=lambda x: -x[1]))}{proba_summary}"
+            )
+
+        _scan_total = _time.time() - _scan_start
+        diag_log.append(
+            f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | cache_build={cache_build_s*1000:.0f}ms"
+        )
+        return {
+            "instrument": instrument, "setups": valid_setups, "rejected_log": rejected_log,
+            "diag_log": diag_log, "latency_ms": int(_scan_total * 1000), "error": None,
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "instrument": instrument, "setups": [], "rejected_log": rejected_log,
+            "diag_log": diag_log, "latency_ms": 0,
+            "error": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+        }
+
 
 def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance: float | None = None, debug_diag: bool = False) -> list[dict]:
     """Scanne un actif : fetch bougies + pipeline Vizion + ML filter.
@@ -1231,6 +1540,14 @@ def run_live(test_dry_run: bool = False):
     log.info(f"Buffers initialises : {len(DATA_BUFFERS)} actifs")
     log.info("=" * 70)
 
+    # === V5.7 (2026-05-21) : ProcessPool 4 workers pour scan parallele ===
+    # Cree UNE fois (workers persistents) -> _models_cache reste chaud entre
+    # cycles. Ferme dans le finally a la fin.
+    from concurrent.futures import ProcessPoolExecutor
+    POOL = ProcessPoolExecutor(max_workers=4)
+    log.info("ProcessPool : 4 workers persistents crees")
+    log.info("=" * 70)
+
     # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
     try:
         boot_diagnostics(mt5_exec, state)
@@ -1290,22 +1607,60 @@ def run_live(test_dry_run: bool = False):
                     _force_first_diag = False
                     log.info(">>> DIAG FORCE (1er scan apres demarrage) <<<")
 
-                # V5.5 (2026-05-21) : scan SEQUENTIEL des 14 actifs.
-                # Le ThreadPool V5.4 etait inutile (GIL bloque le code CPU-bound
-                # numpy/pandas) ET dangereux (MT5 copy_rates pas thread-safe).
-                # Apres l'optim O(N2) (structure_breaks + mss_setups), chaque actif
-                # = ~5s -> 14 actifs en ~70s/cycle, < recent_cutoff 180s. OK.
+                # V5.7 (2026-05-21) : split fetch (main) / compute (ProcessPool 4).
+                # Avant : scan sequentiel ~75s/cycle -> on rate ~30% des pullbacks
+                # rapides (mesure empirique : 55% des OB sont retestes en <1min).
+                # Maintenant : fetch ~4s + compute parallele ~5s -> cycle ~10-20s.
                 _assets_to_scan = [a for a in active_assets if not state.is_in_cooldown(a, now, COOLDOWN_SEC)]
 
                 _setups_by_asset: dict[str, list] = {}
                 _cycle_t0 = time.time()
+
+                # Phase 1 : fetch sequentiel (MT5 + DataBuffer dans le main)
+                _t_fetch = time.time()
+                payloads = []
                 for _a in _assets_to_scan:
                     try:
-                        _setups_by_asset[_a] = scan_asset(mt5_exec, _a, state, balance, _diag_now)
+                        p = fetch_payload(mt5_exec, _a, balance, _diag_now)
+                        if p is not None:
+                            payloads.append(p)
+                        else:
+                            _setups_by_asset[_a] = []
                     except Exception as _e:
-                        log.error(f"scan_asset {_a} exception : {_e}")
+                        log.error(f"fetch_payload {_a} exception : {_e}")
                         _setups_by_asset[_a] = []
-                log.info(f"CYCLE scan {len(_assets_to_scan)} actifs en {time.time() - _cycle_t0:.1f}s")
+                _fetch_s = time.time() - _t_fetch
+
+                # Phase 2 : compute parallele (workers persistents)
+                _t_compute = time.time()
+                try:
+                    results = list(POOL.map(compute_asset, payloads))
+                except Exception as _e:
+                    log.exception(f"POOL.map exception : {_e}")
+                    results = []
+                _compute_s = time.time() - _t_compute
+
+                # Phase 3 : replay logs + rejets + collecte setups
+                for r in results:
+                    inst = r["instrument"]
+                    if r.get("error"):
+                        log.error(f"compute_asset {inst} exception : {r['error'][:200]}")
+                        _setups_by_asset[inst] = []
+                        continue
+                    for line in r["diag_log"]:
+                        log.info(line)
+                    for entry in r["rejected_log"]:
+                        try:
+                            state.log_rejected(*entry)
+                        except Exception:
+                            pass
+                    _setups_by_asset[inst] = r["setups"]
+
+                log.info(
+                    f"CYCLE scan {len(_assets_to_scan)} actifs en "
+                    f"{time.time() - _cycle_t0:.1f}s (fetch={_fetch_s:.1f}s "
+                    f"compute={_compute_s:.1f}s)"
+                )
 
                 for asset in active_assets:
                     setups = _setups_by_asset.get(asset, [])
@@ -1377,6 +1732,11 @@ def run_live(test_dry_run: bool = False):
         log.info("Arret manuel (Ctrl+C)")
         state.log_event("STOP", "Manual stop (Ctrl+C)")
     finally:
+        try:
+            POOL.shutdown(wait=False, cancel_futures=True)
+            log.info("ProcessPool ferme")
+        except Exception:
+            pass
         mt5_exec.shutdown()
         state.close()
         log.info("Bot arrete proprement")
