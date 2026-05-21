@@ -31,6 +31,14 @@ DATA_DIR = ROOT / "data_vantage"
 
 log = logging.getLogger(__name__)
 
+# CAP MEMOIRE V8 (2026-05-21) : le bot live scanne sur N_BARS_M1=88k bougies.
+# Les parquets data_vantage/ font maintenant 8 ans (2.7M+ bougies M1/actif).
+# Charger 8 ans x 17 actifs en RAM -> ~4 GB -> OOM sur VPS Contabo 8 GB.
+# On ne garde que les MAX_BUFFER_BARS dernieres M1 (130k = ~4.5 mois calendaires,
+# ~90 jours ouvres -> de quoi resampler M15/H1/H4/D1 avec les fenetres du bot
+# 88k M1 + marge pour D1). RAM : 17 actifs x 130k x ~40o ~ 90 MB.
+MAX_BUFFER_BARS = 130_000
+
 
 class DataBuffer:
     """Buffer M1 persistent pour 1 actif. Resample HTF a la demande."""
@@ -62,11 +70,18 @@ class DataBuffer:
         # 1. Charge parquet local
         if self.parquet_path.exists():
             try:
-                self.df_m1 = pd.read_parquet(self.parquet_path)
-                if self.df_m1.index.tz is None:
-                    self.df_m1.index = self.df_m1.index.tz_localize("UTC")
+                df = pd.read_parquet(self.parquet_path)
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+                # CAP MEMOIRE : on ne garde que les MAX_BUFFER_BARS dernieres M1.
+                # Evite l'OOM quand le parquet fait 8 ans (2.7M+ bougies).
+                n_full = len(df)
+                if n_full > MAX_BUFFER_BARS:
+                    df = df.iloc[-MAX_BUFFER_BARS:].copy()
+                self.df_m1 = df
                 log.info(
-                    f"BUFFER {self.asset}: charge {len(self.df_m1):,} M1 de "
+                    f"BUFFER {self.asset}: charge {len(self.df_m1):,} M1 "
+                    f"(parquet={n_full:,}, cap={MAX_BUFFER_BARS:,}) de "
                     f"{self.df_m1.index[0]} a {self.df_m1.index[-1]}"
                 )
             except Exception as e:
@@ -159,12 +174,15 @@ class DataBuffer:
         if n_new > 0:
             self.df_m1 = pd.concat([self.df_m1, df_new_filtered])
             self.df_m1 = self.df_m1[~self.df_m1.index.duplicated(keep="last")].sort_index()
+            # CAP MEMOIRE : borne le buffer pour eviter qu'il regrossisse a l'infini.
+            if len(self.df_m1) > MAX_BUFFER_BARS:
+                self.df_m1 = self.df_m1.iloc[-MAX_BUFFER_BARS:].copy()
             self._invalidate_cache()
 
-        # Auto-save si > save_interval_sec depuis derniere save
-        if time.time() - self.last_save_ts > self.save_interval_sec:
-            self.save()
-
+        # V8 (2026-05-21) : auto-save DESACTIVE. Le parquet data_vantage/ contient
+        # 8 ans (base de training). save() ecrirait le buffer cappe (110k) par-dessus
+        # -> on perdrait les 8 ans. Les nouvelles M1 live sont de toute facon
+        # re-fetchables via MT5 au prochain boot (fill_gap_from_mt5).
         return n_new
 
     # ============ GET ============
