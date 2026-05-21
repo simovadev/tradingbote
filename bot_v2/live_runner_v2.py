@@ -350,9 +350,16 @@ def compute_asset(payload: dict) -> dict:
         # V5.1 : virer filtre dur confirm_ob_with_mss (le ML decide via has_mss_nearby).
         obs_confirmed = obs
 
-        # Filtre : OB EN DIRECT (recent_cutoff 3min)
+        # Filtre : OB des 60 dernieres minutes.
+        # FIX V8 (2026-05-21) : recent_cutoff remis a 60min (etait 3min -> BUG).
+        # Avec 3min le bot ne voyait qu'un OB ultra-frais par cycle et ratait
+        # tous les OB qui atteignent ML>=0.75 quelques minutes apres leur
+        # validation (quand le contexte se developpe). Resultat : 0 trade en
+        # live alors que le backtest 24h trouve ~23 trades/jour.
+        # Avec 60min : le bot re-evalue tous les OB recents a chaque cycle,
+        # place le trade des qu'un atteint le seuil. _seen_setups dedoublonne.
         now = df_m1.index[-1]
-        recent_cutoff = now - pd.Timedelta(minutes=3)
+        recent_cutoff = now - pd.Timedelta(minutes=60)
         obs_recent = [
             ob for ob in obs_confirmed
             if df_m1.index[ob.validation_index] >= recent_cutoff
@@ -668,12 +675,12 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # Le ML decide via feature has_mss_nearby (aligne avec V5 training).
     obs_confirmed = obs
 
-    # 3. Filtre : OB EN DIRECT (user 2026-05-20).
-    # V5.1 (2026-05-20) : recent_cutoff 1min -> 3min pour tolerer la latence MT5.
-    # Vantage RAW ECN propage parfois les M1 avec 1-2 min de delai -> OBs legitimes
-    # rejetes par cutoff 1 min. 3 min = bon compromis (pas trop d'OBs obsoletes).
+    # 3. Filtre : OB des 60 dernieres minutes.
+    # FIX V8 (2026-05-21) : recent_cutoff remis a 60min (etait 3min -> BUG).
+    # 3min = le bot ratait tous les OB atteignant ML>=0.75 quelques minutes
+    # apres validation -> 0 trade en live vs ~23/jour en backtest.
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=3)
+    recent_cutoff = now - pd.Timedelta(minutes=60)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
