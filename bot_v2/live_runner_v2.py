@@ -959,17 +959,28 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         )
 
         # === SECURITE 2 : Verifie margin disponible (max 80% balance utilisable) ===
-        # Empeche d'avoir tous les fonds bloques en margin sur 1 trade
+        # FIX V8 (2026-05-21) : utilise mt5.order_calc_margin() (vraie marge avec
+        # levier) au lieu de info.margin_initial * lots. Pour les Forex, MT5
+        # renvoie margin_initial = taille du contrat (100000) -> le calcul donnait
+        # 15000€ de marge pour 0.15 lot USDCAD -> bons trades rejetes a tort.
+        # order_calc_margin tient compte du levier 1:500 -> marge reelle ~30€.
         try:
-            margin_required = info.margin_initial * lots if info.margin_initial > 0 else None
-            if margin_required is not None:
+            import MetaTrader5 as _mt5
+            from bot_v2.mt5_executor import to_broker_symbol
+            broker_sym = to_broker_symbol(instrument)
+            # NB : order_calc_margin renvoie 0 pour les types *_LIMIT chez Vantage.
+            # On utilise ORDER_TYPE_BUY/SELL (marche) -> meme marge que le LIMIT.
+            _otype = (_mt5.ORDER_TYPE_BUY if setup.direction == "bullish"
+                      else _mt5.ORDER_TYPE_SELL)
+            margin_required = _mt5.order_calc_margin(_otype, broker_sym, lots, entry_price)
+            if margin_required is not None and margin_required > 0:
                 if margin_required > balance * 0.8:
                     log.error(
                         f"REJET {instrument} : margin requis {margin_required:.2f}€ > 80% balance ({balance*0.8:.2f}€). SKIP."
                     )
                     return False
-        except Exception:
-            pass  # Pas critique si margin_initial pas dispo
+        except Exception as _me:
+            log.debug(f"order_calc_margin {instrument} KO ({_me}) - check margin saute")
 
     except Exception as e:
         log.error(f"Calc lots error {instrument}: {e}")
