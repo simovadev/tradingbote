@@ -282,10 +282,15 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
         f["atr_ratio_100"] = 1.0
 
     # Features V3 (distance daily levels)
+    # FIX V8 (2026-05-21) : data leakage corrige. Avant : df_d1.index < ts
+    # incluait la D1 du jour en cours (complete en training, partielle en live)
+    # -> features differentes training/live -> ML mal calibre.
+    # Maintenant : on filtre sur ts.normalize() (00:00 du jour) pour exclure le D1
+    # du jour de validation. yesterday = vraiment hier.
     entry_price = setup.entry_price if setup else (ob.ob_low + ob.ob_high) / 2
     pdh = pdl = d1_open = None
     if df_d1 is not None and len(df_d1) > 0:
-        past = df_d1[df_d1.index < ts]
+        past = df_d1[df_d1.index < ts.normalize()]
         if len(past) >= 2:
             yesterday = past.iloc[-1]
             pdh = float(yesterday["high"])

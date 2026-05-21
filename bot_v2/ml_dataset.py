@@ -50,21 +50,23 @@ def _compute_atr(df, idx, period=14):
 
 
 def _get_daily_levels(df_d1, validation_ts):
-    """Retourne (pdh, pdl, daily_open, prev_day_open) au moment de validation_ts."""
+    """Retourne (pdh, pdl, daily_open, prev_day_open) au moment de validation_ts.
+
+    FIX V8 (2026-05-21) : data leakage corrige. Avant : df_d1.index < validation_ts
+    incluait la D1 du jour en cours (complete dans le parquet de training, partielle
+    en live) -> training apprenait sur du futur, live ne pouvait pas reproduire.
+    Maintenant : on filtre sur validation_ts.normalize() pour exclure le D1 du jour.
+    """
     if df_d1 is None or len(df_d1) == 0:
         return None, None, None, None
-    past = df_d1[df_d1.index < validation_ts]
+    today_start = validation_ts.normalize()
+    past = df_d1[df_d1.index < today_start]
     if len(past) < 2:
         return None, None, None, None
     yesterday = past.iloc[-1]
-    today_open_row = df_d1[df_d1.index >= validation_ts]
-    if len(today_open_row) > 0:
-        # Si validation est dans la journee D1 courante
-        today_session = past.iloc[-1] if past.iloc[-1].name.date() == validation_ts.date() else None
-        today_open = today_session["open"] if today_session is not None else yesterday["close"]
-    else:
-        today_open = yesterday["close"]
-    prev_day_open = past.iloc[-2]["open"] if len(past) >= 2 else yesterday["open"]
+    # today_open = close de hier (= open d'aujourd'hui ~ prev close, sans data leakage).
+    today_open = yesterday["close"]
+    prev_day_open = past.iloc[-2]["open"]
     return float(yesterday["high"]), float(yesterday["low"]), float(today_open), float(prev_day_open)
 
 
