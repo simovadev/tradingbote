@@ -1752,13 +1752,23 @@ def run_live(test_dry_run: bool = False):
                     f"compute={_compute_s:.1f}s)"
                 )
                 # V5.8 : push CYCLE + rejets vers le dashboard (non-bloquant)
+                # V5.9 : ajoute last_bar_ts pour afficher la derniere bougie M1
+                # cote dashboard (on prend XAUUSD comme reference)
                 try:
+                    _last_bar_ts = None
+                    try:
+                        _ref_buf = DATA_BUFFERS.get("XAUUSD")
+                        if _ref_buf is not None and _ref_buf.df_m1 is not None and len(_ref_buf.df_m1) > 0:
+                            _last_bar_ts = _ref_buf.df_m1.index[-1]
+                    except Exception:
+                        pass
                     PUSHER.push_cycle(
                         actifs_scanned=len(_assets_to_scan),
                         total_s=_cycle_total_s,
                         fetch_s=_fetch_s,
                         compute_s=_compute_s,
                         latencies=_cycle_latencies,
+                        last_bar_ts=_last_bar_ts,
                     )
                     if _cycle_rejected_batch:
                         PUSHER.push_rejected_batch(_cycle_rejected_batch)

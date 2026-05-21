@@ -100,7 +100,8 @@ class DashboardPusher:
         })
 
     def push_start(self, message: str = "") -> None:
-        self.push_event("START", {"message": message})
+        # session_id duplique dans data pour le dashboard (qui ne voit que data)
+        self.push_event("START", {"message": message, "session_id": self.session_id})
 
     def push_stop(self, message: str = "") -> None:
         self.push_event("STOP", {"message": message})
@@ -115,15 +116,23 @@ class DashboardPusher:
         fetch_s: float,
         compute_s: float,
         latencies: dict[str, int],
+        last_bar_ts: Any = None,
     ) -> None:
-        """Push apres CYCLE scan (1 message qui contient les 14 latences)."""
-        self.push_event("CYCLE", {
+        """Push apres CYCLE scan (1 message qui contient les 14 latences).
+
+        last_bar_ts : timestamp de la derniere bougie M1 (toute reference,
+        ex. XAUUSD) pour afficher cote dashboard "derniere bougie".
+        """
+        data = {
             "actifs_scanned": actifs_scanned,
             "total_s": round(total_s, 2),
             "fetch_s": round(fetch_s, 2),
             "compute_s": round(compute_s, 2),
             "latencies": {k: int(v) for k, v in latencies.items()},
-        })
+        }
+        if last_bar_ts is not None:
+            data["last_bar_ts"] = last_bar_ts.isoformat() if hasattr(last_bar_ts, "isoformat") else str(last_bar_ts)
+        self.push_event("CYCLE", data)
 
     def push_diag(self, instrument: str, data: dict[str, Any]) -> None:
         self.push_event("DIAG", data, instrument=instrument)
