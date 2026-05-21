@@ -271,9 +271,19 @@ OB_MAX_GROUP_SIZE = 5       # garde-fou : pas plus de 5 bougies dans un OB sinon
 # ============ STOP LOSS / TAKE PROFIT (bible §13 + decision user) ============
 # Decision user 2026-05-15 : SL = MECHE TOUJOURS (OB, breaker, FVG).
 SL_MODE = "wick"            # "wick" | "body" (figé sur wick)
-RR_MIN = 2.0                # decision user 2026-05-15 : RR mini 1:2 (PF baseline 1.34)
-RR_TARGET = 2.0             # cible identique baseline
-RR_MAX = 3.0                # decision user : RR max 1:3 (revert 2026-05-16 : 1:5 testé donne -66% WR)
+# RR surchargeable via env var RR_OVERRIDE (ex: build V10 test RR=1.5).
+# Par defaut RR=2.0 (config live inchangee). Si RR_OVERRIDE defini, RR_MIN
+# et RR_TARGET prennent cette valeur (RR_MAX = max(3.0, override)).
+import os as _os
+_rr_override = _os.getenv("RR_OVERRIDE")
+if _rr_override:
+    RR_MIN = float(_rr_override)
+    RR_TARGET = float(_rr_override)
+    RR_MAX = max(3.0, float(_rr_override))
+else:
+    RR_MIN = 2.0            # decision user 2026-05-15 : RR mini 1:2 (PF baseline 1.34)
+    RR_TARGET = 2.0         # cible identique baseline
+    RR_MAX = 3.0            # decision user : RR max 1:3 (revert 2026-05-16 : 1:5 testé -66% WR)
 RISK_PER_TRADE_PCT = 0.01   # 1% du capital, configurable, decision user 2026-05-15
 
 
