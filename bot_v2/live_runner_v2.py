@@ -1998,12 +1998,26 @@ def run_live(test_dry_run: bool = False):
 
                 # Push POSITIONS_SYNC : etat reel MT5 -> dashboard marque
                 # FILLED (avec PnL flottant) / CANCELLED les ordres disparus.
+                # On envoie les details (instrument/direction/entry/sl/tp/volume)
+                # pour permettre au dashboard de recreer une ligne FILLED si elle
+                # n'existe pas (orphan recovery : TRADE_EXECUTED perdu ou bot
+                # redemarre).
                 try:
                     _open_pos = mt5_exec.get_open_positions(magic=BOT_MAGIC)
                     _pend = mt5_exec.get_pending_orders(magic=BOT_MAGIC)
                     PUSHER.push_positions_sync(
                         open_positions=[
-                            {"ticket": p["ticket"], "pnl": p["pnl"]}
+                            {
+                                "ticket": p["ticket"],
+                                "pnl": p["pnl"],
+                                "symbol": p.get("symbol"),
+                                "direction": ("bullish" if p.get("type") == 0
+                                              else "bearish"),
+                                "entry": p.get("price_open"),
+                                "sl": p.get("sl"),
+                                "tp": p.get("tp"),
+                                "volume": p.get("volume"),
+                            }
                             for p in _open_pos
                         ],
                         pending_tickets=[o["ticket"] for o in _pend],
