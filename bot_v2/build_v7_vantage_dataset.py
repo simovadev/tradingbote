@@ -1,17 +1,18 @@
-"""Build dataset ML V6 sur donnees Vantage (data_vantage/).
+"""Build dataset ML V7 sur donnees Vantage 8 ans (data_vantage/).
 
-V6 vs V5 :
+V7 vs V5/V6 :
 - Meme code/features/filtres que V5
-- SOURCE DE DONNEES : data_vantage/ (Vantage broker) au lieu de data/cache/ (Admiral)
+- SOURCE DE DONNEES : data_vantage/ (Vantage broker, 8 ans 2018-2026)
 - Necessaire car le live tourne sur Vantage : prix divergent ~19 USD/bougie XAUUSD
   vs Admiral, le ML V5 voit des patterns differents en live -> rejette tout.
-- Split train/OOS pour validation rigoureuse :
-    Training : 2025-10-23 -> 2026-03-31 (~5 mois)
-    OOS      : 2026-04-01 -> 2026-05-19 (~2 mois, JAMAIS vu en training)
+- Split train/VAL/OOS pour validation rigoureuse :
+    Training : 2018-03 -> 2025-05 (~7 ans)
+    Val      : 2025-05 -> 2025-11 (~6 mois)
+    OOS      : 2025-11 -> 2026-05 (~6 mois, JAMAIS vu en training)
 
 Usage :
-    python -m bot_v2.build_v6_vantage_dataset XAUUSD
-    python -m bot_v2.build_v6_vantage_dataset --all
+    python -m bot_v2.build_v7_vantage_dataset XAUUSD
+    python -m bot_v2.build_v7_vantage_dataset --all
 """
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ ALL_ASSETS = [
 ]
 
 # V7 (2026-05-21) : data Vantage 8 ans (2018-03 -> 2026-05).
-# Le split TRAIN/VAL/OOS se fait dans train_v6_vantage.py :
+# Le split TRAIN/VAL/OOS se fait dans train_v7_vantage.py :
 #   TRAIN 7 ans / VAL 6 mois / OOS 6 mois
 TRAIN_START = pd.Timestamp("2018-03-01", tz="UTC")
 TRAIN_END = pd.Timestamp("2026-05-21", tz="UTC")
@@ -51,7 +52,7 @@ def build_one(asset: str):
     df = load(asset, "M1")
     earliest_start = df.index[0]
     earliest_end = df.index[-1]
-    print(f"\n=== ML DATASET {asset} V6 (Vantage 5 mois training) ===", flush=True)
+    print(f"\n=== ML DATASET {asset} V7 (Vantage 8 ans training) ===", flush=True)
     print(f"Source data    : data_vantage/{asset}_M1.parquet", flush=True)
     print(f"Plage data dispo : {earliest_start.date()} -> {earliest_end.date()}", flush=True)
     print(f"Bougies M1 dispo : {len(df):,}", flush=True)
@@ -74,7 +75,7 @@ def build_one(asset: str):
         chunk_months = 1.5
     print(f"Cores : {cpu_count} -> chunks de {chunk_months} mois", flush=True)
 
-    output_path = Path(f"{ROOT}/data/ml_dataset_{asset}_vantage_v6.parquet")
+    output_path = Path(f"{ROOT}/data/ml_dataset_{asset}_vantage_v7.parquet")
     df_result = build_dataset(
         train_start,
         train_end,
@@ -82,21 +83,21 @@ def build_one(asset: str):
         output_path=output_path,
         chunk_months=chunk_months,
         ltf="M1",
-        version_suffix="_V6_VANTAGE",  # dossier separe des chunks V5
+        version_suffix="_V7_VANTAGE",  # dossier separe des chunks V5/V6
     )
 
-    print(f"\n>>> RECAP {asset} V6 : {len(df_result):,} candidats totaux", flush=True)
+    print(f"\n>>> RECAP {asset} V7 : {len(df_result):,} candidats totaux", flush=True)
     if len(df_result) > 0 and "outcome" in df_result.columns:
         closed = df_result[df_result["outcome"].isin(["WIN", "LOSS"])]
         if len(closed) > 0:
             wr = (closed["outcome"] == "WIN").mean() * 100
-            print(f">>> RECAP {asset} V6 : WR brut {wr:.1f}% sur {len(closed)} fermes",
+            print(f">>> RECAP {asset} V7 : WR brut {wr:.1f}% sur {len(closed)} fermes",
                   flush=True)
     print("=" * 60, flush=True)
 
 
 def main():
-    p = argparse.ArgumentParser(description="Build V6 ML dataset sur donnees Vantage")
+    p = argparse.ArgumentParser(description="Build V7 ML dataset sur donnees Vantage 8 ans")
     p.add_argument("asset", nargs="?", help="Asset (XAUUSD) ou --all")
     p.add_argument("--all", action="store_true", help="Build tous les 14 actifs")
     args = p.parse_args()

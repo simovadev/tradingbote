@@ -1,22 +1,22 @@
-"""Train + validate ML V6 sur dataset Vantage.
+"""Train + validate ML V7 sur dataset Vantage 8 ans.
 
 Pour chaque actif :
-1. Charge le dataset V6 (data/ml_dataset_{asset}_vantage_v6.parquet ou chunks
-   dans data/ml_partial_M1_V6_VANTAGE/).
+1. Charge le dataset V7 (data/ml_dataset_{asset}_vantage_v7.parquet ou chunks
+   dans data/ml_partial_M1_V7_VANTAGE/).
 2. Filtre WIN/LOSS, split temporel TRAIN / VAL / OOS.
 3. Entraine LightGBM (memes hyperparams que V5).
 4. Calcule AUC sur les 3 sets + WR aux seuils 0.55/0.60/0.65/0.70/0.75.
 5. Sauve modele + features + metriques.
 6. Imprime rapport pass/fail par actif (AUC OOS >= 0.65 + WR OOS @0.65 >= 60%).
 
-Split temporel V6 (sur 7 mois Vantage 2025-10-23 -> 2026-05-19) :
-  TRAIN : 2025-10-23 -> 2026-02-28 (4 mois)
-  VAL   : 2026-03-01 -> 2026-03-31 (1 mois)
-  OOS   : 2026-04-01 -> 2026-05-19 (~1.6 mois)
+Split temporel V7 (sur 8 ans Vantage 2018-03 -> 2026-05-21) :
+  TRAIN : 2018-03 -> 2025-05-22 (~7.2 ans)
+  VAL   : 2025-05-22 -> 2025-11-22 (6 mois)
+  OOS   : 2025-11-22 -> 2026-05-21 (6 mois, jamais vu en training)
 
 Usage :
-    python -m bot_v2.train_v6_vantage XAUUSD
-    python -m bot_v2.train_v6_vantage --all
+    python -m bot_v2.train_v7_vantage XAUUSD
+    python -m bot_v2.train_v7_vantage --all
 """
 from __future__ import annotations
 
@@ -55,21 +55,21 @@ NON_FEATURES = {
     "outcome", "pnl_usd", "bars_to_exit",
 }
 
-PARTIAL_DIR = Path(f"{ROOT}/data/ml_partial_M1_V6_VANTAGE")
+PARTIAL_DIR = Path(f"{ROOT}/data/ml_partial_M1_V7_VANTAGE")
 
 
 def load_dataset(asset: str) -> pd.DataFrame | None:
     """Charge dataset final si dispo, sinon agrege les chunks partials."""
-    final_path = Path(f"{ROOT}/data/ml_dataset_{asset}_vantage_v6.parquet")
+    final_path = Path(f"{ROOT}/data/ml_dataset_{asset}_vantage_v7.parquet")
     if final_path.exists():
         print(f"  Chargement dataset final : {final_path.name}")
         df = pd.read_parquet(final_path)
     else:
         chunks = sorted(PARTIAL_DIR.glob(f"{asset}_M1_*.parquet"))
         if not chunks:
-            print(f"  Aucun dataset V6 trouve pour {asset} (ni final ni chunks)")
+            print(f"  Aucun dataset V7 trouve pour {asset} (ni final ni chunks)")
             return None
-        print(f"  Chargement {len(chunks)} chunks V6 pour {asset}")
+        print(f"  Chargement {len(chunks)} chunks V7 pour {asset}")
         dfs = [pd.read_parquet(c) for c in chunks]
         df = pd.concat(dfs, ignore_index=True)
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
@@ -93,7 +93,7 @@ def prepare_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[str]]:
 def train_one(asset: str) -> dict:
     """Train + evaluate. Retourne un dict de metriques."""
     print(f"\n{'='*60}")
-    print(f"=== TRAIN {asset} V6 (Vantage 7 mois) ===")
+    print(f"=== TRAIN {asset} V7 (Vantage 8 ans) ===")
     print(f"{'='*60}")
     df = load_dataset(asset)
     if df is None:
@@ -179,8 +179,8 @@ def train_one(asset: str) -> dict:
             print(f"    seuil={thr:.2f} : {n:>3} trades, WR={wr:.1f}%")
 
     # Save model + features
-    model_path = Path(f"{ROOT}/bot_v2/ml_model_{asset}_vantage_v6.pkl")
-    features_path = Path(f"{ROOT}/bot_v2/ml_features_{asset}_vantage_v6.json")
+    model_path = Path(f"{ROOT}/bot_v2/ml_model_{asset}_vantage_v7.pkl")
+    features_path = Path(f"{ROOT}/bot_v2/ml_features_{asset}_vantage_v7.json")
     with open(model_path, "wb") as f:
         pickle.dump(model, f)
     features_path.write_text(json.dumps({"features": feat_cols}, indent=2))
@@ -227,7 +227,7 @@ def main():
 
         # Recap final
         print("\n" + "=" * 80)
-        print("=== RECAP V6 VANTAGE ===")
+        print("=== RECAP V7 VANTAGE ===")
         print("=" * 80)
         print(f"{'Asset':<10} {'Status':<12} {'AUC OOS':<8} {'WR@0.65':<8} {'N@0.65':<7} {'Verdict':<6}")
         for m in all_metrics:
@@ -239,7 +239,7 @@ def main():
             print(f"{m['asset']:<10} {status:<12} {auc:<8} {wr:<8} {n!s:<7} {verdict:<6}")
 
         # Save recap JSON
-        recap_path = Path(f"{ROOT}/ml_metrics_v6_vantage_recap.json")
+        recap_path = Path(f"{ROOT}/ml_metrics_v7_vantage_recap.json")
         recap_path.write_text(json.dumps(all_metrics, indent=2, default=str))
         print(f"\nRecap sauve : {recap_path.name}")
 

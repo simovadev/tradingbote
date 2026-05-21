@@ -148,18 +148,19 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
-    """Charge le meilleur modele disponible : V6 Vantage > V5 Admiral > V4 > V3.5 > V2.
+    """Charge le meilleur modele disponible : V7 Vantage 8 ans > V5 Admiral > V4 > V3.5 > V2.
 
-    V6 (2026-05-21) : modele entraine sur donnees Vantage 7 mois (data_vantage/)
-    pour alignement training/live. V5 Admiral est garde en backup.
+    V7 (2026-05-21) : modele entraine sur donnees Vantage 8 ans (export MT5
+    desktop -> data_vantage/). Alignement parfait training/live.
+    AUC OOS moy 0.83, WR @0.75 moy 80.7% sur 6 mois OOS.
     """
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V6 Vantage > V5 Admiral > V4 > V3_5 > V2 legacy
+    # Cascade : V7 Vantage > V5 Admiral > V4 > V3_5 > V2 legacy
     candidates = [
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v6.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v6.json"),
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v7.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v7.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v5.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_admiral_v5.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v4.pkl",
@@ -175,10 +176,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v6" in mp.name:
-                version = "V6-Vantage"
+            if "_vantage_v7" in mp.name:
+                version = "V7-Vantage-8ans"
             elif "_v5" in mp.name:
-                version = "V5"
+                version = "V5-Admiral"
             elif "_v4" in mp.name:
                 version = "V4"
             elif "_v3_5" in mp.name:
