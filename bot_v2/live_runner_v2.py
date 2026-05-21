@@ -370,17 +370,17 @@ def compute_asset(payload: dict) -> dict:
             if df_m1.index[ob.validation_index] >= recent_cutoff
         ]
 
-        # ALIGNEMENT OOS (2026-05-21) : l'OOS evalue chaque OB UNE SEULE FOIS
-        # (a sa validation). Le live doit faire pareil : on exclut les OB deja
-        # evalues lors d'un cycle precedent. Sinon un OB rejete a validation+1min
-        # serait re-evalue (avec des features differentes) et possiblement repris
-        # plus tard -> le live ne correspondrait plus au backtest OOS.
-        _evaluated = payload.get("evaluated_keys") or set()
-        if _evaluated:
-            obs_recent = [
-                ob for ob in obs_recent
-                if str(df_m1.index[ob.validation_index]) not in _evaluated
-            ]
+        # NOTE (2026-05-21 soir) : le filtre "1 OB = 1 evaluation" etait
+        # CONTRE-PRODUCTIF. L'OOS evalue 1 fois par OB mais avec tout l'historique
+        # parquet disponible (donc des bougies POSTERIEURES a la validation, ce
+        # qui simule un OB "mur" avec son retest). Le live au moment de la
+        # validation n'a PAS ces bougies futures -> proba differente.
+        # Solution : on laisse le live re-evaluer l'OB a chaque cycle pendant
+        # recent_cutoff=60min. La proba grimpe au fil des bougies (retest,
+        # displacement) -> rejoint la proba OOS au bout de quelques minutes.
+        # Le dedoublonnage des TRADES PLACES est gere ailleurs via _seen_setups.
+        # _evaluated_obs n'est plus utilise pour filtrer (mais on continue de
+        # le maintenir pour des stats / audit eventuel).
 
         if debug_diag:
             from bot_v2.concepts.killzones import killzone_at
