@@ -5,6 +5,7 @@ Pas de download ici : on suppose le cache existant. Si manquant -> erreur claire
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -17,8 +18,29 @@ class CacheMissingError(FileNotFoundError):
     """Le cache parquet pour cet (instrument, tf) n'existe pas."""
 
 
+def _resolve_data_dir() -> Path:
+    """V6 (2026-05-21) : permet de switcher la source de donnees via env var.
+
+    BUILD_DATA_DIR=data_vantage -> charge depuis le dossier data_vantage/
+    (a la racine du repo). Sinon -> DATA_DIR par defaut (data/cache).
+
+    Utilise par le training V6 pour entrainer le ML sur Vantage au lieu
+    d'Admiral. En production live, la var est non definie et on retombe
+    sur le defaut (compat V5).
+    """
+    override = os.getenv("BUILD_DATA_DIR")
+    if override:
+        p = Path(override)
+        # Resolution : si relatif, considere relatif a la racine du repo
+        if not p.is_absolute():
+            repo_root = Path(__file__).resolve().parent.parent
+            p = repo_root / p
+        return p
+    return DATA_DIR
+
+
 def cache_path(instrument: str, tf: str) -> Path:
-    return DATA_DIR / f"{instrument}_{tf}.parquet"
+    return _resolve_data_dir() / f"{instrument}_{tf}.parquet"
 
 
 def load(
