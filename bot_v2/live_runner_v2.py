@@ -148,17 +148,21 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
-    """Charge le meilleur modele disponible : V7 Vantage 8 ans > V5 Admiral > V4 > V3.5 > V2.
+    """Charge le meilleur modele disponible : V8 Vantage > V7 > V5 Admiral > V4 > V3.5 > V2.
 
-    V7 (2026-05-21) : modele entraine sur donnees Vantage 8 ans (export MT5
-    desktop -> data_vantage/). Alignement parfait training/live.
-    AUC OOS moy 0.83, WR @0.75 moy 80.7% sur 6 mois OOS.
+    V8 (2026-05-21) : meme data V7 (Vantage 8 ans) MAIS fix data leakage
+    PDH/PDL/D1_open dans ml_filter._features_from_result et
+    ml_dataset._get_daily_levels. Training et live calculent maintenant
+    les memes features (D1 du jour exclu via ts.normalize()).
+    AUC OOS moy 0.82, WR @0.65 moy 75% sur 6 mois OOS.
     """
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V7 Vantage > V5 Admiral > V4 > V3_5 > V2 legacy
+    # Cascade : V8 > V7 > V5 Admiral > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v8.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v8.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v7.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_vantage_v7.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v5.pkl",
@@ -176,7 +180,9 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v7" in mp.name:
+            if "_vantage_v8" in mp.name:
+                version = "V8-Vantage-NoLeakage"
+            elif "_vantage_v7" in mp.name:
                 version = "V7-Vantage-8ans"
             elif "_v5" in mp.name:
                 version = "V5-Admiral"
