@@ -828,10 +828,15 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     ob = setup_dict["ob"]
     setup = r.trade_setup
 
-    # === FIX 2026-05-20 : check derive prix + fraicheur setup ===
-    # 1. Age du setup : si OB valide y'a >5 min, le marche a probablement bouge trop
+    # === Age du setup ===
+    # FIX V8 (2026-05-21) : seuil 3min -> 60min (aligne sur recent_cutoff).
+    # 3min rejetait structurellement tous les bons setups : un OB ICT met
+    # 20-40 min a murir (retest -> proba ML monte au seuil). Le commentaire
+    # ci-dessous confirme qu'il n'y a aucun risque a placer le LIMIT meme si
+    # l'OB a quelques dizaines de minutes (LIMIT au prix OB, fill seulement
+    # si le prix revient toucher entry, sinon expire). 60min = coherent.
     age_setup_min = (pd.Timestamp.now(tz="UTC") - ob.validation_ts).total_seconds() / 60
-    if age_setup_min > 3:
+    if age_setup_min > 60:
         log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
         return False
 
@@ -952,6 +957,12 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     except Exception as e:
         log.error(f"Calc lots error {instrument}: {e}")
         return False
+
+    # DEBUG V8 (2026-05-21) : trace avant l'envoi de l'ordre
+    log.info(
+        f"DEBUG {instrument} : avant place_limit_order | lots={lots} "
+        f"entry={entry_price} sl={sl_price} tp={tp_price}"
+    )
 
     # V2 : Place un ordre LIMIT au prix de l'OB (= comportement backtest).
     # Si prix touche entry_price -> fill au prix exact. Si non -> expire en 60min.
@@ -1631,13 +1642,15 @@ def run_live(test_dry_run: bool = False):
     if test_dry_run:
         log.info("** MODE DRY RUN - aucun ordre ne sera place **")
 
-    # User 2026-05-20 : aucun trade au demarrage. Seuls les setups dont validation_ts
-    # est >= BOT_START_TS sont pris -> bot attend les setups FRAIS qui se forment
-    # apres le boot.
-    # V5.1 (2026-05-20) : tolerance -1min pour recuperer un OB qui valide
-    # juste avant le demarrage du bot (sinon premiers OBs systematiquement rejetes).
-    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=1)
-    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs ignores, tolerance 1min)")
+    # FIX V8 (2026-05-21) : BOT_START_TS aligne sur recent_cutoff (60min).
+    # Avant : now - 1min -> au redemarrage, le bot ignorait pendant 1h tous les
+    # OB que recent_cutoff lui montrait (ceux valides avant le boot) -> un OB
+    # mur a ML 0.759 detecte comme SETUP mais jamais execute.
+    # Maintenant : now - 60min -> le bot peut trader tout OB de la derniere
+    # heure des le boot (coherent avec recent_cutoff). _seen_setups + le cap
+    # recent_cutoff empechent de trader du vraiment vieux.
+    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=60)
+    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs a -60min ignores)")
 
     # V5.4 : init DataBuffer pour chaque actif (charge parquet 7mois + comble trou via MT5)
     log.info("=" * 70)

@@ -64,25 +64,25 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
     ("NAS100", "M5"): Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_NAS100_M5.json"),
 }
 
-# V5 thresholds (user 2026-05-20) - calibre sur OOS 12 mois Admiral 8 ans
-# Strategie : seuil 0.75 partout (WR ~80%+ sur tous les actifs). User assume volume
-# eleve (~5-10 trades/jour/actif) en compensant par risque reduit.
+# V8 thresholds (user 2026-05-21) - seuil 0.70 partout.
+# Calibre sur OOS V8 6 mois (14 actifs, sans data leakage) :
+#   seuil 0.70 -> WR global 77.3%, ~23 trades/jour sur les 14 actifs.
+# Choix user : bon compromis volume / qualite (WR 77%).
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.75,  # V5 TEST WR 86.5% @0.75, AUC 0.818
-    "NAS100": 0.75,  # V5 TEST WR 79.7% @0.75, AUC 0.828
-    "GER40":  0.75,  # V5 TEST WR 80.6% @0.75, AUC 0.829
-    "BTCUSD": 0.75,  # V5 TEST WR 78.1% @0.75, AUC 0.828
-    "EURUSD": 0.75,  # V5 TEST WR 81.5% @0.75, AUC 0.836
-    "GBPUSD": 0.75,  # V5 TEST WR 80.1% @0.75, AUC 0.826
-    "AUDUSD": 0.75,  # V5 TEST WR 78.3% @0.75, AUC 0.829
-    "USDJPY": 0.75,  # V5 TEST WR 81.2% @0.75, AUC 0.825
-    "SP500":  0.75,  # V5 TEST WR 76.5% @0.75, AUC 0.819
-    "DJ30":   0.75,  # V5 TEST WR 82.5% @0.75, AUC 0.824
-    "UK100":  0.75,  # V5 TEST WR 82.1% @0.75, AUC 0.820
-    "FRA40":  0.75,  # V5 TEST WR 82.1% @0.75, AUC 0.827
-    "USDCAD": 0.75,  # V5 TEST WR 81.3% @0.75, AUC 0.826
-    "USDCHF": 0.75,  # V5 TEST WR 84.7% @0.75, AUC 0.828
-    # JP225 desactive (ecart Duka/Vantage trop grand)
+    "XAUUSD": 0.70,
+    "NAS100": 0.70,
+    "GER40":  0.70,
+    "BTCUSD": 0.70,
+    "EURUSD": 0.70,
+    "GBPUSD": 0.70,
+    "AUDUSD": 0.70,
+    "USDJPY": 0.70,
+    "SP500":  0.70,
+    "DJ30":   0.70,
+    "UK100":  0.70,
+    "FRA40":  0.70,
+    "USDCAD": 0.70,
+    "USDCHF": 0.70,
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {
