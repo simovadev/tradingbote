@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pickle
 import time
 from pathlib import Path
@@ -53,6 +54,7 @@ from bot_v2.data_buffer import DataBuffer
 from bot_v2.live_state import LiveState
 from bot_v2.mt5_executor import MT5Executor
 from bot_v2.pipeline import evaluate_ob
+from bot_v2.push_dashboard import DashboardPusher
 from bot_v2.trade_setup import compute_position_size
 
 
@@ -116,6 +118,9 @@ N_BARS_D1 = 120      # = chunk + buffer 4 mois training
 
 # Buffers data par actif (init dans main(), un par asset)
 DATA_BUFFERS: dict[str, "DataBuffer"] = {}
+
+# Pusher dashboard (module-global, init dans run_live, lu par execute_setup)
+_PUSHER: "DashboardPusher | None" = None
 
 
 def get_risk_pct(balance: float) -> float:
@@ -942,6 +947,25 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     # Update cooldown
     state.set_last_trade_ts(instrument, pd.Timestamp.now(tz="UTC"))
 
+    # V5.8 : push TRADE_EXECUTED vers le dashboard (Telegram notif)
+    if _PUSHER is not None:
+        try:
+            _PUSHER.push_trade_executed(
+                instrument=instrument,
+                ticket=int(result["ticket"]),
+                direction=setup.direction,
+                entry=float(result["price"]),
+                sl=float(sl_price),
+                tp=float(tp_price),
+                volume=float(result["volume"]),
+                rr=float(setup.rr),
+                ml_proba=float(setup_dict["proba"]),
+                score=int(r.score),
+                killzone=r.killzone_name,
+            )
+        except Exception as _pe:
+            log.debug(f"push_trade_executed fail: {_pe}")
+
     log.info(
         f"PENDING ORDER {instrument} {setup.direction} vol={lots} "
         f"entry={entry_price:.5f} SL={sl_price:.5f} TP={tp_price:.5f} "
@@ -1009,6 +1033,21 @@ def reconcile_closed_trades(mt5_exec: MT5Executor, state: LiveState):
             pnl_real=float(pnl),
         )
         log.info(f"TRADE CLOSED ticket={ticket} {outcome} pnl={pnl:+.2f}€")
+
+        # V5.8 : push TRADE_CLOSED vers le dashboard (Telegram notif)
+        if _PUSHER is not None:
+            try:
+                # Duree approximative : depuis le 1er deal (open) jusqu'au dernier (close)
+                _first_deal_time = min(d["time"] for d in related)
+                _dur_min = (last_deal_time - _first_deal_time).total_seconds() / 60.0
+                _PUSHER.push_trade_closed(
+                    ticket=int(ticket),
+                    outcome=outcome,
+                    pnl_real=float(pnl),
+                    duration_min=_dur_min,
+                )
+            except Exception as _pe:
+                log.debug(f"push_trade_closed fail: {_pe}")
 
 
 # ========== DIAGNOSTICS AU DEMARRAGE ==========
@@ -1497,10 +1536,24 @@ def run_live(test_dry_run: bool = False):
     state = LiveState()
     state.log_event("START", f"Bot live demarre (dry_run={test_dry_run})")
 
+    # V5.8 (2026-05-21) : dashboard pusher (Railway).
+    # DASHBOARD_URL vide -> no-op (dev local).
+    import uuid
+    global _PUSHER
+    _session_id = uuid.uuid4().hex[:8]
+    _PUSHER = DashboardPusher(
+        url=os.getenv("DASHBOARD_URL"),
+        session_id=_session_id,
+    )
+    PUSHER = _PUSHER  # alias local pour le reste de run_live
+    PUSHER.push_start(f"Bot demarre (dry_run={test_dry_run})")
+
     mt5_exec = MT5Executor()
     if not mt5_exec.initialize():
         log.error("MT5 init FAILED - bot ne demarre pas")
         state.log_event("ERROR", "MT5 init failed")
+        PUSHER.push_error("MT5 init failed")
+        PUSHER.shutdown()
         return
 
     log.info(f"Connecte au compte {mt5_exec.account_info.login} sur {mt5_exec.account_info.server}")
@@ -1641,6 +1694,9 @@ def run_live(test_dry_run: bool = False):
                 _compute_s = time.time() - _t_compute
 
                 # Phase 3 : replay logs + rejets + collecte setups
+                _cycle_latencies: dict[str, int] = {}
+                _cycle_setups_pushed = 0
+                _cycle_rejected_batch: list[dict] = []
                 for r in results:
                     inst = r["instrument"]
                     if r.get("error"):
@@ -1654,13 +1710,60 @@ def run_live(test_dry_run: bool = False):
                             state.log_rejected(*entry)
                         except Exception:
                             pass
+                        # Batch pour le dashboard (entry = tuple type log_rejected)
+                        try:
+                            _cycle_rejected_batch.append({
+                                "instrument": entry[0],
+                                "ts": str(entry[1]),
+                                "direction": entry[2],
+                                "reason": entry[3],
+                                "ml_proba": entry[4] if len(entry) > 4 else None,
+                                "score": entry[5] if len(entry) > 5 else None,
+                            })
+                        except Exception:
+                            pass
                     _setups_by_asset[inst] = r["setups"]
+                    # Latence pour le push CYCLE
+                    if r.get("latency_ms"):
+                        _cycle_latencies[inst] = r["latency_ms"]
+                    # Push SETUP par setup ML-OK
+                    for s in r["setups"]:
+                        try:
+                            PUSHER.push_setup(
+                                instrument=inst,
+                                ts=s["ts"],
+                                direction=s["ob"].direction,
+                                entry_price=s["r"].trade_setup.entry_price,
+                                sl=s["r"].trade_setup.stop_loss,
+                                tp=s["r"].trade_setup.take_profit,
+                                rr=s["r"].trade_setup.rr,
+                                score=s["r"].score,
+                                ml_proba=s["proba"],
+                                killzone=None,
+                            )
+                            _cycle_setups_pushed += 1
+                        except Exception as _pe:
+                            log.debug(f"push_setup fail {inst}: {_pe}")
 
+                _cycle_total_s = time.time() - _cycle_t0
                 log.info(
                     f"CYCLE scan {len(_assets_to_scan)} actifs en "
-                    f"{time.time() - _cycle_t0:.1f}s (fetch={_fetch_s:.1f}s "
+                    f"{_cycle_total_s:.1f}s (fetch={_fetch_s:.1f}s "
                     f"compute={_compute_s:.1f}s)"
                 )
+                # V5.8 : push CYCLE + rejets vers le dashboard (non-bloquant)
+                try:
+                    PUSHER.push_cycle(
+                        actifs_scanned=len(_assets_to_scan),
+                        total_s=_cycle_total_s,
+                        fetch_s=_fetch_s,
+                        compute_s=_compute_s,
+                        latencies=_cycle_latencies,
+                    )
+                    if _cycle_rejected_batch:
+                        PUSHER.push_rejected_batch(_cycle_rejected_batch)
+                except Exception as _pe:
+                    log.debug(f"push_cycle fail: {_pe}")
 
                 for asset in active_assets:
                     setups = _setups_by_asset.get(asset, [])
@@ -1721,10 +1824,34 @@ def run_live(test_dry_run: bool = False):
                         f"WR={stats['wr']:.1f}% PnL={stats['pnl_total']:+.2f}€ "
                         f"balance={balance:.2f}€"
                     )
+                    # V5.8 : push STATS vers le dashboard
+                    try:
+                        _eq = None
+                        try:
+                            _eq = mt5_exec.get_equity()
+                        except Exception:
+                            pass
+                        PUSHER.push_stats(
+                            total=stats.get("total", 0),
+                            wins=stats.get("wins", 0),
+                            losses=stats.get("losses", 0),
+                            wr_pct=stats.get("wr", 0),
+                            pnl_total=stats.get("pnl_total", 0),
+                            balance=balance,
+                            equity=_eq,
+                            positions_open=n_open,
+                            pending_orders=n_pending,
+                        )
+                    except Exception as _pe:
+                        log.debug(f"push_stats fail: {_pe}")
 
             except Exception as e:
                 log.exception(f"Erreur dans la boucle : {e}")
                 state.log_event("ERROR", str(e))
+                try:
+                    PUSHER.push_error(str(e))
+                except Exception:
+                    pass
 
             time.sleep(SCAN_INTERVAL_SEC)
 
@@ -1735,6 +1862,12 @@ def run_live(test_dry_run: bool = False):
         try:
             POOL.shutdown(wait=False, cancel_futures=True)
             log.info("ProcessPool ferme")
+        except Exception:
+            pass
+        # V5.8 : flush + shutdown du pusher dashboard
+        try:
+            PUSHER.push_stop("Bot arrete")
+            PUSHER.shutdown()
         except Exception:
             pass
         mt5_exec.shutdown()
