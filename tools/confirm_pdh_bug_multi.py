@@ -51,7 +51,7 @@ def test_asset(asset, parquet_dir):
             pass
 
     sws = get_param(asset, "swing_strength_m1", 2)
-    obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+    obs = detect_order_blocks(df_m1, swing_strength=sws)
     cache = {
         "swings_ltf": find_swings(df_m1, strength=sws),
         "fvgs_ltf": detect_fvg(df_m1),

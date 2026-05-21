@@ -114,7 +114,7 @@ def diag_asset(asset: str, parquet_dir: Path, n_setups: int = 5):
 
     # Detection (meme que compute_asset)
     sws = get_param(asset, "swing_strength_m1", 2)
-    obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+    obs = detect_order_blocks(df_m1, swing_strength=sws)
     cache = {
         "swings_ltf": find_swings(df_m1, strength=sws),
         "fvgs_ltf": detect_fvg(df_m1),

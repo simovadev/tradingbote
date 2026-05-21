@@ -219,11 +219,15 @@ def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, m
 
 def fetch_payload(
     mt5_exec: MT5Executor, instrument: str, balance: float | None, debug_diag: bool,
+    evaluated_keys: set | None = None,
 ) -> dict | None:
     """V5.7 (2026-05-21) : phase FETCH (process principal).
 
     Recupere les bougies M1/M15/H1/H4/D1 + les correles SMT. Construit un
     dict picklable a envoyer aux workers ProcessPool. AUCUN calcul ICT ici.
+
+    evaluated_keys : set des timestamps (str) d'OB deja evalues lors d'un
+    cycle precedent -> compute_asset les exclut (1 OB = 1 evaluation, OOS).
 
     Retourne None si les donnees sont insuffisantes (skip cet actif).
     """
@@ -290,6 +294,7 @@ def fetch_payload(
         "df_h4": df_h4,
         "df_d1": df_d1,
         "correlated_dfs": correlated_dfs,
+        "evaluated_keys": evaluated_keys or set(),
     }
 
 
@@ -329,7 +334,7 @@ def compute_asset(payload: dict) -> dict:
         # Detection OB+MSS
         _t = _time.time()
         sws = get_param(instrument, "swing_strength_m1", 2)
-        obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+        obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
         cache = {
             "swings_ltf": find_swings(df_m1, strength=sws),
             "fvgs_ltf": detect_fvg(df_m1),
@@ -364,6 +369,18 @@ def compute_asset(payload: dict) -> dict:
             ob for ob in obs_confirmed
             if df_m1.index[ob.validation_index] >= recent_cutoff
         ]
+
+        # ALIGNEMENT OOS (2026-05-21) : l'OOS evalue chaque OB UNE SEULE FOIS
+        # (a sa validation). Le live doit faire pareil : on exclut les OB deja
+        # evalues lors d'un cycle precedent. Sinon un OB rejete a validation+1min
+        # serait re-evalue (avec des features differentes) et possiblement repris
+        # plus tard -> le live ne correspondrait plus au backtest OOS.
+        _evaluated = payload.get("evaluated_keys") or set()
+        if _evaluated:
+            obs_recent = [
+                ob for ob in obs_recent
+                if str(df_m1.index[ob.validation_index]) not in _evaluated
+            ]
 
         if debug_diag:
             from bot_v2.concepts.killzones import killzone_at
@@ -650,7 +667,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # 2. Detection OB+MSS
     _t = _time.time()
     sws = get_param(instrument, "swing_strength_m1", 2)
-    obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+    obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
     cache = {
         "swings_ltf": find_swings(df_m1, strength=sws),
         "fvgs_ltf": detect_fvg(df_m1),
@@ -1174,7 +1191,7 @@ def boot_diagnostics(mt5_exec: MT5Executor, state: LiveState):
         if df_m1 is not None and len(df_m1) >= 100:
             try:
                 sws = get_param(asset, "swing_strength_m1", 2)
-                obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+                obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
                 n_ob = len(obs)
                 swings = find_swings(df_m1, strength=sws)
                 sb = detect_structure_breaks(df_m1, swings=swings)
@@ -1290,7 +1307,7 @@ def simulate_last_24h(mt5_exec: MT5Executor):
         from bot_v2.concepts.fvg import detect_fvg
         from bot_v2.concepts.breaker import detect_breakers
 
-        obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+        obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
         cache = {
             "swings_ltf": find_swings(df_m1, strength=sws),
             "fvgs_ltf": detect_fvg(df_m1),
@@ -1475,7 +1492,7 @@ def debug_last_hour(mt5_exec: MT5Executor):
                 continue
 
         sws = get_param(asset, "swing_strength_m1", 2)
-        obs = detect_order_blocks(df_m1, swing_strength=sws, max_group_size=2)
+        obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
         cache = {
             "swings_ltf": find_swings(df_m1, strength=sws),
             "fvgs_ltf": detect_fvg(df_m1),
@@ -1735,6 +1752,9 @@ def run_live(test_dry_run: bool = False):
                 # FIX 2026-05-20 : dedup setups par validation_ts pour eviter reprises
                 if not hasattr(state, "_seen_setups"):
                     state._seen_setups = {}
+                # ALIGNEMENT OOS : 1 OB = 1 evaluation. {asset: set(ob_ts_str)}.
+                if not hasattr(state, "_evaluated_obs"):
+                    state._evaluated_obs = {}
 
                 # DIAG : log diagnostic complet chaque ~5 min + 1er scan force
                 _diag_now = _force_first_diag or (int(time.time()) % 300 < SCAN_INTERVAL_SEC)
@@ -1756,7 +1776,9 @@ def run_live(test_dry_run: bool = False):
                 payloads = []
                 for _a in _assets_to_scan:
                     try:
-                        p = fetch_payload(mt5_exec, _a, balance, _diag_now)
+                        _eval_keys = state._evaluated_obs.get(_a, set())
+                        p = fetch_payload(mt5_exec, _a, balance, _diag_now,
+                                          evaluated_keys=_eval_keys)
                         if p is not None:
                             payloads.append(p)
                         else:
@@ -1809,6 +1831,16 @@ def run_live(test_dry_run: bool = False):
                         except Exception:
                             pass
                     _setups_by_asset[inst] = r["setups"]
+
+                    # ALIGNEMENT OOS : marque TOUS les OB evalues ce cycle
+                    # (rejets + setups) -> ils ne seront plus re-evalues.
+                    # 1 OB = 1 evaluation, exactement comme le backtest.
+                    _ev = state._evaluated_obs.setdefault(inst, set())
+                    for entry in r["rejected_log"]:
+                        _ev.add(str(entry[1]))  # entry[1] = ts de l'OB
+                    for s in r["setups"]:
+                        _ev.add(str(s["ts"]))
+
                     # Latence pour le push CYCLE
                     if r.get("latency_ms"):
                         _cycle_latencies[inst] = r["latency_ms"]
@@ -1911,6 +1943,12 @@ def run_live(test_dry_run: bool = False):
                         k: v for k, v in state._seen_setups.items()
                         if (now - v).total_seconds() < 7200
                     }
+                    # Cleanup _evaluated_obs : garde les 800 derniers ts/actif
+                    # (un OB hors recent_cutoff ne sera plus jamais re-evalue,
+                    # donc pas besoin de garder sa cle indefiniment).
+                    _ev_asset = state._evaluated_obs.get(asset)
+                    if _ev_asset and len(_ev_asset) > 800:
+                        state._evaluated_obs[asset] = set(sorted(_ev_asset)[-800:])
 
                 # V5.9 (2026-05-21) : Stats poussees a chaque cycle (~20s).
                 # Avant : int(time()) % 300 < SCAN_INTERVAL_SEC -> fenetre de 5s
