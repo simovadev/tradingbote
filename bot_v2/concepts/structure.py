@@ -77,6 +77,7 @@ def detect_structure_breaks(
     df: pd.DataFrame,
     swings: list[Swing] | None = None,
     swing_strength: int = 2,
+    fvgs: list[FVG] | None = None,
 ) -> list[StructureBreak]:
     """Detecte BOS et MSS.
 
@@ -89,28 +90,44 @@ def detect_structure_breaks(
        - Cassure contre la tendance = MSS.
     3. Pour MSS : on verifie aussi la presence d'un FVG dans les 3 bougies
        autour de la cassure (modele 2022).
+
+    Args:
+        fvgs: FVGs pre-calcules (evite un detect_fvg redondant si l'appelant
+              les a deja). Si None, calcule en interne.
     """
     if swings is None:
         swings = find_swings(df, strength=swing_strength)
 
     closes = df["close"].values
     breaks: list[StructureBreak] = []
-    fvgs = detect_fvg(df)
+    if fvgs is None:
+        fvgs = detect_fvg(df)
 
-    # OPTIM V5.4 (2026-05-21) : pre-calcul des index de swings tries pour bisect.
-    # Avant : `[s for s in swings if s.index < j]` dans la double boucle = O(N3)
-    # -> 145s sur 88k bougies. Maintenant bisect O(log N) -> ~1s.
     import bisect as _bisect
     _swing_indices = [s.index for s in swings]  # deja trie (swings tries par index)
 
     import numpy as _np
 
+    # OPTIM V5.5 (2026-05-21) : index FVG par center_index pour le check
+    # "FVG dans displacement". Avant : `for f in fvgs` par MSS = O(N_mss * N_fvg)
+    # = 16k * 22k = 350M iterations Python (~5s). Maintenant : lookup direct
+    # par index dans 2 listes pre-bucketees (bull/bear). O(1) par MSS.
+    _n = len(closes)
+    _fvg_bull_at: list[bool] = [False] * (_n + 1)
+    _fvg_bear_at: list[bool] = [False] * (_n + 1)
+    for f in fvgs:
+        ci = f.center_index
+        if 0 <= ci <= _n:
+            if f.direction == "bullish":
+                _fvg_bull_at[ci] = True
+            else:
+                _fvg_bear_at[ci] = True
+
     for k, swing in enumerate(swings):
         target = swing.price
-        # OPTIM V5.4 : numpy argmax pour trouver la 1ere cassure (vectorise)
-        # au lieu d'une boucle Python jusqu'a len(df).
+        # numpy argmax pour trouver la 1ere cassure (vectorise).
         _start = swing.index + 1
-        if _start >= len(closes):
+        if _start >= _n:
             continue
         _seg = closes[_start:]
         if swing.kind == "high":
@@ -121,45 +138,41 @@ def detect_structure_breaks(
             continue  # swing jamais casse
         j = _start + int(_np.argmax(_hits))  # 1ere bougie qui casse
 
-        # On ne garde que ce bloc (1 cassure par swing)
-        if True:
-            broke_up = swing.kind == "high"
-            direction: Direction = "bullish" if broke_up else "bearish"
+        broke_up = swing.kind == "high"
+        direction: Direction = "bullish" if broke_up else "bearish"
 
-            # Tendance basee sur les swings AVANT la cassure (bisect = O(log N))
-            # detect_trend ne regarde que les ~6 derniers swings -> on slice court.
-            _cut = _bisect.bisect_left(_swing_indices, j)
-            swings_before = swings[max(0, _cut - 20):_cut]
-            trend = detect_trend(swings_before, lookback=4)
+        # Tendance basee sur les swings AVANT la cassure (bisect = O(log N)).
+        _cut = _bisect.bisect_left(_swing_indices, j)
+        swings_before = swings[max(0, _cut - 20):_cut]
+        trend = detect_trend(swings_before, lookback=4)
 
-            if trend is None:
-                # Pas de tendance claire : on considere par defaut comme MSS
-                kind: StructureKind = "MSS"
-            elif trend == direction:
-                kind = "BOS"
-            else:
-                kind = "MSS"
+        if trend is None:
+            kind: StructureKind = "MSS"
+        elif trend == direction:
+            kind = "BOS"
+        else:
+            kind = "MSS"
 
-            # Pour MSS : check FVG dans displacement (3 bougies avant -> 3 apres la cassure)
-            has_fvg = False
-            if kind == "MSS":
-                window_start = max(0, j - 3)
-                window_end = min(len(df), j + 4)
-                for f in fvgs:
-                    if window_start <= f.center_index < window_end and f.direction == direction:
-                        has_fvg = True
-                        break
+        # Pour MSS : check FVG dans displacement (3 bougies avant -> 3 apres).
+        has_fvg = False
+        if kind == "MSS":
+            window_start = max(0, j - 3)
+            window_end = min(_n, j + 4)
+            _at = _fvg_bull_at if direction == "bullish" else _fvg_bear_at
+            for _ci in range(window_start, window_end):
+                if _at[_ci]:
+                    has_fvg = True
+                    break
 
-            breaks.append(StructureBreak(
-                kind=kind,
-                direction=direction,
-                swing=swing,
-                break_index=j,
-                break_ts=df.index[j],
-                break_close=float(closes[j]),
-                has_displacement_fvg=has_fvg,
-            ))
-            # un swing = une seule cassure (deja gere par argmax de la 1ere)
+        breaks.append(StructureBreak(
+            kind=kind,
+            direction=direction,
+            swing=swing,
+            break_index=j,
+            break_ts=df.index[j],
+            break_close=float(closes[j]),
+            has_displacement_fvg=has_fvg,
+        ))
 
     return breaks
 

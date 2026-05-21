@@ -300,13 +300,18 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
         "breakers_ltf": detect_breakers(df_m1),
         "obs_htf": detect_order_blocks(df_m15),
     }
-    cache["structure_breaks"] = detect_structure_breaks(df_m1, swings=cache["swings_ltf"])
+    # V5.5 (2026-05-21) : on passe fvgs_ltf pre-calcule a structure_breaks ET
+    # mss_setups -> evite 2 detect_fvg redondants sur 88k bougies (~3.5s gagne).
+    cache["structure_breaks"] = detect_structure_breaks(
+        df_m1, swings=cache["swings_ltf"], fvgs=cache["fvgs_ltf"]
+    )
     cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
     cache["obs_htf2"] = detect_order_blocks(df_h1)
     _timings["cache_build"] = _time.time() - _t
 
     mss_setups = detect_mss_setups(
-        df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"]
+        df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"],
+        fvgs=cache["fvgs_ltf"],
     )
     _timings["mss_detect"] = _time.time() - _t
     # V5.1 (2026-05-20) : virer filtre dur confirm_ob_with_mss.
@@ -1285,26 +1290,22 @@ def run_live(test_dry_run: bool = False):
                     _force_first_diag = False
                     log.info(">>> DIAG FORCE (1er scan apres demarrage) <<<")
 
-                # V5.4 : scan parallele des 14 actifs (ThreadPoolExecutor)
-                # Avant : sequentiel ~70s/cycle. Apres : ~5-10s/cycle (14x plus rapide).
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                # Filtre actifs hors cooldown
+                # V5.5 (2026-05-21) : scan SEQUENTIEL des 14 actifs.
+                # Le ThreadPool V5.4 etait inutile (GIL bloque le code CPU-bound
+                # numpy/pandas) ET dangereux (MT5 copy_rates pas thread-safe).
+                # Apres l'optim O(N2) (structure_breaks + mss_setups), chaque actif
+                # = ~5s -> 14 actifs en ~70s/cycle, < recent_cutoff 180s. OK.
                 _assets_to_scan = [a for a in active_assets if not state.is_in_cooldown(a, now, COOLDOWN_SEC)]
 
                 _setups_by_asset: dict[str, list] = {}
-                with ThreadPoolExecutor(max_workers=min(14, len(_assets_to_scan) or 1)) as _executor:
-                    _futures = {
-                        _executor.submit(scan_asset, mt5_exec, a, state, balance, _diag_now): a
-                        for a in _assets_to_scan
-                    }
-                    for _f in as_completed(_futures):
-                        _a = _futures[_f]
-                        try:
-                            _setups_by_asset[_a] = _f.result()
-                        except Exception as _e:
-                            log.error(f"scan_asset {_a} exception : {_e}")
-                            _setups_by_asset[_a] = []
+                _cycle_t0 = time.time()
+                for _a in _assets_to_scan:
+                    try:
+                        _setups_by_asset[_a] = scan_asset(mt5_exec, _a, state, balance, _diag_now)
+                    except Exception as _e:
+                        log.error(f"scan_asset {_a} exception : {_e}")
+                        _setups_by_asset[_a] = []
+                log.info(f"CYCLE scan {len(_assets_to_scan)} actifs en {time.time() - _cycle_t0:.1f}s")
 
                 for asset in active_assets:
                     setups = _setups_by_asset.get(asset, [])

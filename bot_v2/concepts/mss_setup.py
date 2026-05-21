@@ -60,6 +60,22 @@ def _displacement_ratio(df: pd.DataFrame, break_idx: int, lookback: int = 14) ->
     return body / atr
 
 
+def _displacement_ratio_fast(
+    opens, closes, hl_range, break_idx: int, lookback: int = 14
+) -> float:
+    """Version vectorisee de _displacement_ratio : opere sur des arrays numpy
+    pre-calcules au lieu de df.iloc (slicing pandas lent quand appele 16k fois).
+    hl_range = high - low (array). Resultat identique a _displacement_ratio.
+    """
+    if break_idx < lookback:
+        return 0.0
+    atr = float(hl_range[break_idx - lookback:break_idx].mean())
+    if atr == 0:
+        return 0.0
+    body = abs(float(closes[break_idx]) - float(opens[break_idx]))
+    return body / atr
+
+
 def detect_mss_setups(
     df: pd.DataFrame,
     structure_breaks: list[StructureBreak] | None = None,
@@ -69,6 +85,7 @@ def detect_mss_setups(
     sl_buffer_pct: float = 0.0005,
     min_displacement_atr: float = 0.3,   # V5 (user 2026-05-20) : 0.5->0.3 (MSS plus sensible en volatilite moyenne)
     min_swing_age_bars: int = 5,         # le swing casse doit etre vieux d'au moins 5 bougies
+    fvgs: list[FVG] | None = None,
 ) -> list[MSSSetup]:
     """Detecte les setups MSS tradables.
 
@@ -80,14 +97,28 @@ def detect_mss_setups(
     Args:
         max_bars_to_retest: si pas de retest dans N bougies, le setup est skip.
         sl_buffer_pct: marge en % au-dela du swing casse pour le SL.
+        fvgs: FVGs pre-calcules (evite un detect_fvg redondant). Si None, calcule.
     """
+    if fvgs is None:
+        fvgs = detect_fvg(df)
     if structure_breaks is None:
-        structure_breaks = detect_structure_breaks(df, swings=swings, swing_strength=swing_strength)
+        structure_breaks = detect_structure_breaks(
+            df, swings=swings, swing_strength=swing_strength, fvgs=fvgs
+        )
 
-    fvgs = detect_fvg(df)
     highs = df["high"].values
     lows = df["low"].values
     closes = df["close"].values
+    opens = df["open"].values
+    # OPTIM V5.5 : pre-calc high-low pour _displacement_ratio_fast (vectorise).
+    _hl_range = highs - lows
+
+    # OPTIM V5.5 : index FVG par center_index. Avant : `for f in fvgs` par MSS
+    # = O(N_mss * N_fvg) = 14k * 22k = 300M iterations Python. Maintenant : on
+    # ne scanne que les 7 index de la fenetre [break-3, break+3].
+    _fvg_by_center: dict[int, list[FVG]] = {}
+    for f in fvgs:
+        _fvg_by_center.setdefault(f.center_index, []).append(f)
 
     setups: list[MSSSetup] = []
     seen_keys: set = set()  # dedup par (direction, break_index)
@@ -102,7 +133,7 @@ def detect_mss_setups(
             continue
 
         # Filtre 2 : displacement franc sur la bougie de break
-        disp_ratio = _displacement_ratio(df, br.break_index)
+        disp_ratio = _displacement_ratio_fast(opens, closes, _hl_range, br.break_index)
         if disp_ratio < min_displacement_atr:
             continue
 
@@ -116,9 +147,10 @@ def detect_mss_setups(
         window_start = max(0, br.break_index - 3)
         window_end = min(len(df), br.break_index + 4)
         candidate_fvgs = [
-            f for f in fvgs
-            if window_start <= f.center_index < window_end
-            and f.direction == br.direction
+            f
+            for ci in range(window_start, window_end)
+            for f in _fvg_by_center.get(ci, ())
+            if f.direction == br.direction
         ]
         if not candidate_fvgs:
             continue

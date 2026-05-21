@@ -353,7 +353,11 @@ def _process_instrument(args):
             "breakers_ltf": detect_breakers(df_ltf_w),
             "obs_htf": detect_order_blocks(df_htf),
         }
-        cache["structure_breaks"] = detect_structure_breaks(df_ltf_w, swings=cache["swings_ltf"])
+        # V5.5 (2026-05-21) : passe fvgs_ltf pre-calcule -> evite 2 detect_fvg
+        # redondants. Resultats identiques (verifie), train reste aligne live.
+        cache["structure_breaks"] = detect_structure_breaks(
+            df_ltf_w, swings=cache["swings_ltf"], fvgs=cache["fvgs_ltf"]
+        )
         cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
         if df_htf2 is not None:
             cache["obs_htf2"] = detect_order_blocks(df_htf2)
@@ -367,6 +371,7 @@ def _process_instrument(args):
             df_ltf_w,
             structure_breaks=cache["structure_breaks"],
             swings=cache["swings_ltf"],
+            fvgs=cache["fvgs_ltf"],
         )
         cache["mss_setups"] = mss_setups
         print(f"    OB total: {len(obs)}, MSS: {len(mss_setups)}", flush=True)
