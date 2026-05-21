@@ -194,9 +194,10 @@ def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None, m
         f["vol_ratio_setup"] = 1.0
 
     # Presence MSS proche (remplace le filtre dur confirm_ob_with_mss)
+    # FIX V9 (2026-05-22) : leak corrige - on ne regarde plus le futur (abs).
     _mss_list = mss_setups or []
     f["has_mss_nearby"] = int(any(
-        abs(getattr(mss, "mss", mss).break_index - ob.validation_index) <= 10
+        0 <= ob.validation_index - getattr(mss, "mss", mss).break_index <= 10
         for mss in _mss_list
     ))
 

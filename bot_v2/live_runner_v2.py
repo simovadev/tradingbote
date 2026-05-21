@@ -148,19 +148,22 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
-    """Charge le meilleur modele disponible : V8 Vantage > V7 > V5 Admiral > V4 > V3.5 > V2.
+    """Charge le meilleur modele disponible : V9 > V8 > V7 > V5 Admiral > V4 > V3.5 > V2.
 
-    V8 (2026-05-21) : meme data V7 (Vantage 8 ans) MAIS fix data leakage
-    PDH/PDL/D1_open dans ml_filter._features_from_result et
-    ml_dataset._get_daily_levels. Training et live calculent maintenant
-    les memes features (D1 du jour exclu via ts.normalize()).
-    AUC OOS moy 0.82, WR @0.65 moy 75% sur 6 mois OOS.
+    V9 (2026-05-22) : fix data leakages multiples par rapport a V8 :
+    count_ob_retests, has_mss_nearby, FVG sync, breaker, SMT, associated_pdr.
+    Toutes les features ne regardent plus le futur. Training et live
+    calculent les memes features.
+
+    V8 (2026-05-21) : fix data leakage PDH/PDL/D1_open uniquement.
     """
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V8 > V7 > V5 Admiral > V4 > V3_5 > V2 legacy
+    # Cascade : V9 > V8 > V7 > V5 Admiral > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v9.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v9.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v8.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_vantage_v8.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v7.pkl",
@@ -180,8 +183,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v8" in mp.name:
-                version = "V8-Vantage-NoLeakage"
+            if "_vantage_v9" in mp.name:
+                version = "V9-Vantage-NoLeakage-FULL"
+            elif "_vantage_v8" in mp.name:
+                version = "V8-Vantage-PartialFix"
             elif "_vantage_v7" in mp.name:
                 version = "V7-Vantage-8ans"
             elif "_v5" in mp.name:

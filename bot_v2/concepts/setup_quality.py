@@ -63,11 +63,12 @@ def compute_ob_strength(
         score += 1
 
     # Critere 3 : presence d'un FVG dans la zone de validation
+    # FIX V9 (2026-05-22) : abs() incluait +/-3 bougies = leak de 3 bougies futures.
+    # Maintenant : on accepte UNIQUEMENT les FVG forme AVANT ou PENDANT la validation.
     if fvgs:
         for f in fvgs:
             if f.direction == ob.direction:
-                # FVG dans les 3 bougies autour de la validation
-                if abs(f.center_index - ob.validation_index) <= 3:
+                if 0 <= ob.validation_index - f.center_index <= 3:
                     score += 2
                     break
 
@@ -216,12 +217,27 @@ def detect_unicorn_setup(
     return True
 
 
-def count_ob_retests(ob: OrderBlock, df: pd.DataFrame) -> int:
-    """Compte combien de fois le price est revenu TOUCHER l'OB apres validation."""
+RETEST_LOOKAHEAD_BARS = 15  # V9: horizon cohérent live/training (15 bougies M1 ~= 15min)
+
+
+def count_ob_retests(ob: OrderBlock, df: pd.DataFrame, lookahead_bars: int = RETEST_LOOKAHEAD_BARS) -> int:
+    """Compte combien de fois le price est revenu TOUCHER l'OB dans une fenetre
+    limitée APRES validation.
+
+    FIX V9 (2026-05-22) : DATA LEAKAGE corrige. Avant, le compteur regardait
+    TOUTES les bougies apres validation_index (jusqu'a la fin du df). En training,
+    cela exposait jusqu'a plusieurs heures de futur ; en live, le compteur valait
+    quasi toujours 0-1 au moment de la decision. Le ML apprenait sur le futur.
+
+    Maintenant : on cap à `lookahead_bars` bougies apres validation (defaut 15 M1).
+    Coherent avec le live : le bot scanne en boucle et re-evalue l'OB pendant la
+    fenetre `recent_cutoff=60min`, donc 15 bougies apres validation est accessible.
+    """
     if ob.validation_index >= len(df) - 1:
         return 0
 
-    after = df.iloc[ob.validation_index + 1:]
+    end_idx = min(len(df), ob.validation_index + 1 + lookahead_bars)
+    after = df.iloc[ob.validation_index + 1:end_idx]
     touches = 0
     in_zone = False
 
@@ -258,10 +274,12 @@ def compute_setup_quality(
     retest = count_ob_retests(ob, df)
 
     # FVG/IFVG associes sur le chemin de validation
+    # FIX V9 (2026-05-22) : on ne regarde plus +5 bougies APRES validation (leak),
+    # on s'arrete a validation_index.
     associated = 0
     for f in fvgs:
         if f.direction == ob.direction:
-            if ob.sweep.sweep_index <= f.center_index <= ob.validation_index + 5:
+            if ob.sweep.sweep_index <= f.center_index <= ob.validation_index:
                 associated += 1
 
     aligned = (htf_trend == ob.direction) if htf_trend else False

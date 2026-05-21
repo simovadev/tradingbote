@@ -360,10 +360,11 @@ def evaluate_ob(
     # Gain ~1000x sur cette etape (260k bougies -> 240 bougies par appel).
     if correlated_dfs:
         smt_found = False
+        # FIX V9 (2026-05-22) : fenetre stricte fin a validation_ts (avant : +5min = leak)
         smt_window = pd.Timedelta(hours=2)
         ob_ts = ob.validation_ts
         win_start = ob_ts - smt_window
-        win_end = ob_ts + pd.Timedelta(minutes=5)
+        win_end = ob_ts
         df_ltf_win = df_ltf.loc[win_start:win_end]
         if len(df_ltf_win) >= 5:  # Sinon pas assez de bougies pour des swings
             for corr_name, (df_c, corr_type) in correlated_dfs.items():
@@ -395,9 +396,11 @@ def evaluate_ob(
     # ========== BONUS : Breaker (bible V2 §7 - KZ OBLIGATOIRE) ==========
     # Video 01 YAhGt8tmfCY : un BB hors killzone est INVALIDE.
     # On ne compte le breaker comme confluence QUE s'il s'est forme en killzone.
+    # FIX V9 (2026-05-22) : avant abs() = leak +/- 20 bougies. Maintenant : breaker
+    # forme AVANT ou A validation_index uniquement.
     brks = cache["breakers_ltf"] if cache and "breakers_ltf" in cache else detect_breakers(df_ltf)
     for br in brks:
-        if br.direction == ob.direction and abs(br.inverse_index - ob.validation_index) < 20:
+        if br.direction == ob.direction and 0 <= (ob.validation_index - br.inverse_index) < 20:
             # Bible V2 §7 : verifier que le BB s'est forme en killzone
             br_ts = df_ltf.index[br.inverse_index]
             br_in_kz = killzone_at(br_ts) is not None
@@ -487,12 +490,14 @@ def evaluate_ob(
     # V3.5 (2026-05-19) : FVG sync n'est plus OBLIGATOIRE mais BONUS.
     # Raison : exiger une FVG dans ±1 bougie de validation OB rejette 60% des setups.
     # Beaucoup d'OB valides n'ont pas de FVG sync mais marchent (le ML decidera).
+    # FIX V9 (2026-05-22) : avant abs() = leak +/- 1 bougie. Maintenant : FVG forme
+    # AVANT ou A validation_index uniquement.
     fvgs_for_sync = cache["fvgs_ltf"] if cache and "fvgs_ltf" in cache else detect_fvg(df_ltf)
     sync_found = False
     for fvg in fvgs_for_sync:
         if fvg.direction != ob.direction:
             continue
-        if abs(fvg.center_index - ob.validation_index) <= 1:
+        if 0 <= ob.validation_index - fvg.center_index <= 1:
             sync_found = True
             res.score += 12
             res.confluences.append("OB_FVG_sync_high_proba")
