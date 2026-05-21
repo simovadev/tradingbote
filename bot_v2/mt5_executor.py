@@ -496,6 +496,27 @@ class MT5Executor:
             })
         return out
 
+    def get_open_positions(self, magic: int | None = None) -> list[dict]:
+        """Liste des positions ouvertes avec PnL flottant (pour le dashboard)."""
+        positions = mt5.positions_get()
+        if positions is None:
+            return []
+        out = []
+        for p in positions:
+            if magic and p.magic != magic:
+                continue
+            out.append({
+                "ticket": p.ticket,
+                "symbol": from_broker_symbol(p.symbol),
+                "type": p.type,           # 0=BUY, 1=SELL
+                "volume": p.volume,
+                "price_open": p.price_open,
+                "sl": p.sl,
+                "tp": p.tp,
+                "pnl": p.profit,          # PnL flottant en devise compte
+            })
+        return out
+
     def cancel_pending_order(self, ticket: int) -> bool:
         """Annule un ordre pending."""
         request = {

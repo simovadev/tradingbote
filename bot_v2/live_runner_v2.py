@@ -1996,6 +1996,21 @@ def run_live(test_dry_run: bool = False):
                 except Exception as _pe:
                     log.debug(f"push_stats fail: {_pe}")
 
+                # Push POSITIONS_SYNC : etat reel MT5 -> dashboard marque
+                # FILLED (avec PnL flottant) / CANCELLED les ordres disparus.
+                try:
+                    _open_pos = mt5_exec.get_open_positions(magic=BOT_MAGIC)
+                    _pend = mt5_exec.get_pending_orders(magic=BOT_MAGIC)
+                    PUSHER.push_positions_sync(
+                        open_positions=[
+                            {"ticket": p["ticket"], "pnl": p["pnl"]}
+                            for p in _open_pos
+                        ],
+                        pending_tickets=[o["ticket"] for o in _pend],
+                    )
+                except Exception as _pe:
+                    log.debug(f"push_positions_sync fail: {_pe}")
+
             except Exception as e:
                 log.exception(f"Erreur dans la boucle : {e}")
                 state.log_event("ERROR", str(e))

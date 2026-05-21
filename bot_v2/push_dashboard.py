@@ -237,6 +237,27 @@ class DashboardPusher:
             "pending_orders": int(pending_orders),
         })
 
+    def push_positions_sync(
+        self,
+        open_positions: list[dict[str, Any]],
+        pending_tickets: list[int],
+    ) -> None:
+        """Envoie l'etat reel MT5 a chaque cycle.
+
+        open_positions : [{"ticket": int, "pnl": float}] positions ouvertes.
+        pending_tickets : [int] tickets des ordres LIMIT encore en attente.
+
+        Le dashboard marque FILLED les positions ouvertes (avec pnl flottant)
+        et CANCELLED les trades PENDING dont l'ordre a disparu de MT5.
+        """
+        self.push_event("POSITIONS_SYNC", {
+            "open_positions": [
+                {"ticket": int(p["ticket"]), "pnl": float(p.get("pnl", 0.0))}
+                for p in open_positions
+            ],
+            "pending_tickets": [int(t) for t in pending_tickets],
+        })
+
     def shutdown(self, wait_drain_sec: float = 2.0) -> None:
         """Arrete le worker proprement (a appeler dans le finally de main)."""
         if not self._running:
