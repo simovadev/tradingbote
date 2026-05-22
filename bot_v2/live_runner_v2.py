@@ -37,6 +37,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+# === V10 (2026-05-22) : aligne le live sur le training V10 ===
+# Le dataset/modeles V10 ont ete construits avec swing_strength=1 (+88% d'OB)
+# et RR=1.5. Le live DOIT utiliser les memes valeurs sinon il voit des OB
+# differents et des SL/TP differents -> divergence training/live.
+# On force les env vars AVANT l'import de bot_v2.config.
+os.environ.setdefault("SWS_OVERRIDE", "1")
+os.environ.setdefault("RR_OVERRIDE", "1.5")
+
 import pandas as pd
 
 from bot_v2 import ml_filter
@@ -148,20 +156,24 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
-    """Charge le meilleur modele disponible : V9 > V8 > V7 > V5 Admiral > V4 > V3.5 > V2.
+    """Charge le meilleur modele disponible : V10 > V9 > V8 > V7 > V5 > V4 > V3.5 > V2.
 
-    V9 (2026-05-22) : fix data leakages multiples par rapport a V8 :
-    count_ob_retests, has_mss_nearby, FVG sync, breaker, SMT, associated_pdr.
-    Toutes les features ne regardent plus le futur. Training et live
-    calculent les memes features.
+    V10 (2026-05-22) : 15 nouvelles features (PO3 enrichi, momentum, displacement,
+    atr_regime), swing_strength=1 (+88% d'OB), RR=1.5, hyperparametres 'deeper'.
+    AUC OOS moy 0.741. WR@0.70 81%. Volume x2.5 vs V9. IMPORTANT : le live DOIT
+    tourner avec swing_strength=1 (cf SWS_OVERRIDE) pour voir les memes OB que
+    le dataset de training.
 
+    V9 (2026-05-22) : fix data leakages multiples (retests, MSS, FVG, breaker...).
     V8 (2026-05-21) : fix data leakage PDH/PDL/D1_open uniquement.
     """
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V9 > V8 > V7 > V5 Admiral > V4 > V3_5 > V2 legacy
+    # Cascade : V10 > V9 > V8 > V7 > V5 Admiral > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v10.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v10.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v9.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_vantage_v9.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v8.pkl",
@@ -183,7 +195,9 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v9" in mp.name:
+            if "_vantage_v10" in mp.name:
+                version = "V10-Vantage-MoreVolume"
+            elif "_vantage_v9" in mp.name:
                 version = "V9-Vantage-NoLeakage-FULL"
             elif "_vantage_v8" in mp.name:
                 version = "V8-Vantage-PartialFix"
