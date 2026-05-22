@@ -884,6 +884,53 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
         return False
 
+    # === FIX V10.1 (2026-05-22) : garde-fou "mouvement deja consomme" ===
+    # Bug observe : au demarrage du bot, il rejoue les OB de la derniere heure.
+    # Si entre la validation de l'OB et MAINTENANT le prix a deja fait tout le
+    # mouvement (atteint le TP, ou touche le SL), placer un pending est inutile
+    # voire dangereux (mauvaise entree retardee). On verifie les bougies M1
+    # ECOULEES depuis validation_index : si le prix a deja atteint le TP ou le
+    # SL, le setup est obsolete -> SKIP.
+    _df_m1 = setup_dict.get("df_m1")
+    if _df_m1 is not None and ob.validation_index is not None:
+        _after = _df_m1.iloc[ob.validation_index + 1:]
+        if len(_after) > 0:
+            _hi = float(_after["high"].max())
+            _lo = float(_after["low"].min())
+            _entry = float(setup.entry_price)
+            _tp = float(setup.take_profit)
+            _sl = float(setup.stop_loss)
+            if setup.direction == "bearish":
+                # SELL : TP en-dessous de l'entry, SL au-dessus.
+                if _lo <= _tp:
+                    log.warning(
+                        f"SETUP OBSOLETE {instrument} bearish : le prix a deja "
+                        f"atteint le TP ({_tp}) depuis la validation (low={_lo}). "
+                        f"Mouvement consomme, SKIP."
+                    )
+                    return False
+                if _hi >= _sl:
+                    log.warning(
+                        f"SETUP OBSOLETE {instrument} bearish : le prix a deja "
+                        f"touche le SL ({_sl}) depuis la validation (high={_hi}). SKIP."
+                    )
+                    return False
+            else:
+                # BUY : TP au-dessus de l'entry, SL en-dessous.
+                if _hi >= _tp:
+                    log.warning(
+                        f"SETUP OBSOLETE {instrument} bullish : le prix a deja "
+                        f"atteint le TP ({_tp}) depuis la validation (high={_hi}). "
+                        f"Mouvement consomme, SKIP."
+                    )
+                    return False
+                if _lo <= _sl:
+                    log.warning(
+                        f"SETUP OBSOLETE {instrument} bullish : le prix a deja "
+                        f"touche le SL ({_sl}) depuis la validation (low={_lo}). SKIP."
+                    )
+                    return False
+
     # User 2026-05-20 : aligne sur backtest = pas de check derive.
     # Le LIMIT au prix OB se fill SI ET SEULEMENT SI le prix revient toucher entry.
     # Sinon il expire dans 30 min. Pas de risque a placer le LIMIT meme si prix
