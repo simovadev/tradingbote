@@ -110,8 +110,11 @@ MAX_CONCURRENT = 8
 # Avec MAX_CONCURRENT=8 * 5% = 40% exposition max = safe
 # Au-dessus 5000€ : 3% pour limiter DD a 24% max
 THRESHOLD_SAFE_MODE = 5000.0
-RISK_PCT_AGGRESSIVE = 0.05    # 5% par trade jusqu'a 5000€ (vs 30% V2)
-RISK_PCT_SAFE = 0.03           # 3% au-dessus de 5000€
+# V10.2 (2026-05-22) : user descend le risque a 2% le temps de valider le WR
+# en live (au lieu de 5%). Permet d'observer un volume de trades sans risquer
+# trop d'argent. Remonter quand le WR live est confirme (~50 trades min).
+RISK_PCT_AGGRESSIVE = 0.02    # 2% par trade (TEST live, avant : 5%)
+RISK_PCT_SAFE = 0.02           # 2% au-dessus de 5000€ aussi
 RISK_PCT_TEST = 0.02
 
 # Magic number (identifie nos trades dans MT5)
