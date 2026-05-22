@@ -26,14 +26,16 @@ TRAIN_END = pd.Timestamp("2026-05-22", tz="UTC")
 
 def main():
     rr = os.getenv("RR_OVERRIDE", "2.0")
-    suffix = f"_V10TEST_RR{rr.replace('.','')}"
-    print(f"BUILD V10 TEST | RR={rr} | suffix={suffix}", flush=True)
+    sws = os.getenv("SWS_OVERRIDE", "def")  # 'def' = swing_strength par defaut config
+    tag = f"rr{rr.replace('.','')}_sws{sws}"
+    suffix = f"_V10TEST_{tag.upper()}"
+    print(f"BUILD V10 TEST | RR={rr} | SWS={sws} | suffix={suffix}", flush=True)
     for asset in TEST_ASSETS:
         df = load(asset, "M1")
         ts = max(TRAIN_START, df.index[0])
         te = min(TRAIN_END, df.index[-1])
         print(f"\n=== {asset} V10 TEST ({ts.date()} -> {te.date()}) ===", flush=True)
-        out = Path(f"{ROOT}/data/ml_dataset_{asset}_v10test_rr{rr.replace('.','')}.parquet")
+        out = Path(f"{ROOT}/data/ml_dataset_{asset}_v10test_{tag}.parquet")
         cpu = os.cpu_count() or 4
         chunk = 0.25 if cpu >= 64 else 1.0
         dfr = build_dataset(ts, te, [asset], output_path=out,
