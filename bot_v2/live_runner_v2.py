@@ -45,6 +45,14 @@ from typing import Any
 os.environ.setdefault("SWS_OVERRIDE", "1")
 os.environ.setdefault("RR_OVERRIDE", "1.5")
 
+# Dashboard Railway : URL par defaut si non fournie par l'environnement.
+# Avant : le bot dependait de DASHBOARD_URL dans l'env du terminal -> si lance
+# autrement (nohup, script), l'URL etait vide et le dashboard ne recevait rien.
+os.environ.setdefault(
+    "DASHBOARD_URL",
+    "https://tradingbote-production.up.railway.app/api/ingest",
+)
+
 import pandas as pd
 
 from bot_v2 import ml_filter
