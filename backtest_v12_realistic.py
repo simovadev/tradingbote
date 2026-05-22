@@ -233,16 +233,23 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp,
             # On limite aux memes nb que le live pour avoir EXACTEMENT le meme
             # contexte d'analyse (sinon les features ATR/momentum/swings divergent
             # car calcules sur des fenetres differentes).
-            mask_m1 = df_m1_full.index <= cut
-            idx_end = mask_m1.values.argmin() if not mask_m1.all() else len(df_m1_full)
+            # OPTIM : on utilise searchsorted (O(log n)) au lieu d'un mask (O(n)).
+            idx_end = df_m1_full.index.searchsorted(cut, side="right")
             idx_start_m1 = max(0, idx_end - 88000)
             df_m1 = df_m1_full.iloc[idx_start_m1:idx_end]
             if len(df_m1) < 200:
                 continue
-            df_m15 = df_m15_full[df_m15_full.index <= cut].iloc[-11000:]
-            df_h1 = df_h1_full[df_h1_full.index <= cut].iloc[-2800:]
-            df_h4 = df_h4_full[df_h4_full.index <= cut].iloc[-500:] if df_h4_full is not None else None
-            df_d1 = df_d1_full[df_d1_full.index <= cut].iloc[-120:]
+            idx_m15 = df_m15_full.index.searchsorted(cut, side="right")
+            df_m15 = df_m15_full.iloc[max(0, idx_m15 - 11000):idx_m15]
+            idx_h1 = df_h1_full.index.searchsorted(cut, side="right")
+            df_h1 = df_h1_full.iloc[max(0, idx_h1 - 2800):idx_h1]
+            if df_h4_full is not None:
+                idx_h4 = df_h4_full.index.searchsorted(cut, side="right")
+                df_h4 = df_h4_full.iloc[max(0, idx_h4 - 500):idx_h4]
+            else:
+                df_h4 = None
+            idx_d1 = df_d1_full.index.searchsorted(cut, side="right")
+            df_d1 = df_d1_full.iloc[max(0, idx_d1 - 120):idx_d1]
 
             # 1. Verifie fills/SL/TP des pendings actifs
             still_active = []
