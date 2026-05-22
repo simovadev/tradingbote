@@ -79,7 +79,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--start", required=True, help="YYYY-MM-DD")
     p.add_argument("--end", required=True, help="YYYY-MM-DD")
-    p.add_argument("--step", type=int, default=1, help="Pas en minutes (default 1)")
+    p.add_argument("--step", type=int, default=5, help="Pas en minutes (default 5 - compromis vitesse/realisme)")
     p.add_argument("--assets", nargs="+", default=None)
     p.add_argument("--workers", type=int, default=14,
                    help="Nb workers parallel (default 14 = 1 par actif)")

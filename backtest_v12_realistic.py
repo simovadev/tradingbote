@@ -211,6 +211,12 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp,
     last_print = time.time()
 
     while cur <= end:
+        # OPTIM : skip weekend forex (sam 22h UTC -> dim 22h UTC = pas de bougies)
+        # On garde le sam matin (marche encore ouvert ven soir) et le dim soir (reouverture).
+        wd = cur.weekday()  # 0=Lun ... 5=Sam, 6=Dim
+        if (wd == 5 and cur.hour >= 22) or wd == 6 and cur.hour < 22:
+            cur += pd.Timedelta(minutes=scan_step_min)
+            continue
         # Pour chaque actif
         for a in assets:
             df_m1_full = data[a]["M1"]
@@ -221,13 +227,19 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp,
 
             # Coupe a cur - 1 min (fix bougie-en-cours : pos=1)
             cut = cur - pd.Timedelta(minutes=1)
-            df_m1 = df_m1_full[df_m1_full.index <= cut]
+            # OPTIM PERF : limite df_m1 aux 30k dernieres bougies (= ~3 semaines)
+            # Largement assez pour OB detection et features ATR/momentum.
+            # Sans ca, scanner 80k bougies a chaque cycle = 30+ heures de backtest.
+            mask_m1 = df_m1_full.index <= cut
+            idx_end = mask_m1.values.argmin() if not mask_m1.all() else len(df_m1_full)
+            idx_start = max(0, idx_end - 30000)
+            df_m1 = df_m1_full.iloc[idx_start:idx_end]
             if len(df_m1) < 200:
                 continue
-            df_m15 = df_m15_full[df_m15_full.index <= cut]
-            df_h1 = df_h1_full[df_h1_full.index <= cut]
-            df_h4 = df_h4_full[df_h4_full.index <= cut] if df_h4_full is not None else None
-            df_d1 = df_d1_full[df_d1_full.index <= cut]
+            df_m15 = df_m15_full[df_m15_full.index <= cut].iloc[-5000:]
+            df_h1 = df_h1_full[df_h1_full.index <= cut].iloc[-2000:]
+            df_h4 = df_h4_full[df_h4_full.index <= cut].iloc[-800:] if df_h4_full is not None else None
+            df_d1 = df_d1_full[df_d1_full.index <= cut].iloc[-300:]
 
             # 1. Verifie fills/SL/TP des pendings actifs
             still_active = []
