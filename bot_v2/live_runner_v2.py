@@ -206,7 +206,12 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
-    """Charge le meilleur modele disponible : V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3.5 > V2.
+    """Charge le meilleur modele disponible : V12 > V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3.5 > V2.
+
+    V12 (2026-05-22) : 'PUR AMONT' - 1 evaluation par OB au moment de la
+    validation, cache strictement amont (<= vi). Plus de feature snapshot_k.
+    Corrige le data leakage V11 (snapshots K=[3,7,15] qui faisaient voir au ML
+    3-15 bougies post-validation). Le ML note l'OB sur son setup AMONT.
 
     V11 (2026-05-22) : 'training realiste' - 3 snapshots par OB (K=3,7,15 min)
     pour aligner training et live. Feature `snapshot_k` que le live remplit
@@ -221,8 +226,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3_5 > V2 legacy
+    # Cascade : V12 > V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v12.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v12.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v11.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_vantage_v11.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v10.pkl",
@@ -248,7 +255,9 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v11" in mp.name:
+            if "_vantage_v12" in mp.name:
+                version = "V12-Vantage-PureAmont-NoLeakage"
+            elif "_vantage_v11" in mp.name:
                 version = "V11-Vantage-RealisticTraining"
             elif "_vantage_v10" in mp.name:
                 version = "V10-Vantage-MoreVolume"
@@ -549,16 +558,46 @@ def compute_asset(payload: dict) -> dict:
         valid_setups: list[dict] = []
         diag_reasons: dict[str, int] = {}
         diag_ml_probas: list[float] = []
+        # V12 mode : si la feature snapshot_k est absente du modele charge,
+        # c'est un modele V12 -> evaluation strictement amont (cache filtre a vi).
+        is_v12 = "snapshot_k" not in features
+        sws_ltf = get_param(instrument, "swing_strength_m1", 2)
         for ob in obs_recent:
+            # En V12 : tronque df_m1 et le cache a la bougie de validation (vi),
+            # exactement comme le build V12. Ainsi le ML voit les memes features
+            # qu'en training -> zero divergence training/live.
+            if is_v12 and ob.validation_index is not None:
+                vi = ob.validation_index
+                cut = vi + 1  # inclut la bougie de validation, rien apres
+                df_m1_eval = df_m1.iloc[:cut]
+                cache_eval = {
+                    "swings_ltf":      [s for s in cache.get("swings_ltf", [])
+                                        if s.index + sws_ltf + 1 <= cut],
+                    "fvgs_ltf":        [f for f in cache.get("fvgs_ltf", [])
+                                        if f.center_index + 1 <= cut],
+                    "breakers_ltf":    [b for b in cache.get("breakers_ltf", [])
+                                        if b.inverse_index <= cut],
+                    "structure_breaks":[sb for sb in cache.get("structure_breaks", [])
+                                        if sb.break_index <= cut],
+                    "obs_htf":         cache.get("obs_htf"),
+                    "obs_htf2":        cache.get("obs_htf2"),
+                    "htf_trend":       cache.get("htf_trend"),
+                }
+                mss_eval = [m for m in (mss_setups or [])
+                            if m.retest_index is not None and m.retest_index <= cut]
+            else:
+                df_m1_eval = df_m1
+                cache_eval = cache
+                mss_eval = mss_setups
             try:
                 r = evaluate_ob(
-                    ob, df_m1, df_m15, df_d1, instrument,
+                    ob, df_m1_eval, df_m15, df_d1, instrument,
                     ltf_name="M1", htf_name="M15",
                     df_htf2=df_h1, htf2_name="H1",
                     correlated_dfs=correlated_dfs,
                     htf_swings=htf_swings,
                     df_h1=df_h1, min_score=0, min_quality=0,
-                    cache=cache,
+                    cache=cache_eval,
                 )
             except Exception as e:
                 diag_reasons["evaluate_ob_exception"] = (

@@ -12,6 +12,7 @@ Le ML apprendra a filtrer la qualite.
 """
 from __future__ import annotations
 
+import os
 import sys
 # Auto-detect Windows vs Linux pour le sys.path
 _ROOT = "c:/Users/Shadow/TradingBot" if sys.platform == "win32" else "/workspace/TradingBot"
@@ -268,14 +269,21 @@ def _process_instrument(args):
         prefiltered_mss = []
 
         rows = []
-        # V11 (2026-05-22) : training REALISTE.
-        # Au lieu d'evaluer chaque OB 1 fois avec le df complet (features
-        # matures qui n'existeront pas en live), on l'evalue a plusieurs
-        # snapshots K = [3, 7, 15] bougies M1 apres validation. Le ML voit
-        # le meme OB sous 3 angles "comme en live a +K min". Resout la
-        # divergence training/live (cf bug USDCHF : training=0.28, live=0.60).
-        # Le label (WIN/LOSS) est calcule sur le df complet (verite terrain).
-        SNAPSHOTS_K = [3, 7, 15]
+        # V12 (2026-05-22) : mode "PUR AMONT, ZERO LEAKAGE".
+        # Active via env var BUILD_V12_MODE=1. Si set :
+        #   - 1 seule evaluation par OB, AU MOMENT de la validation (vi)
+        #   - cache strictement amont : tout filtre par index <= vi
+        #   - pas de snapshot_k (= marqueur du leakage V11)
+        # Le ML apprend a noter l'OB sur son PASSE uniquement, comme le veut
+        # la logique ICT/SMC : un OB est juge sur comment il a ete cree
+        # (sweep, structure amont, deplacement amont), pas sur ce qui suit.
+        # Le label (WIN/LOSS) reste calcule sur le df complet (verite terrain).
+        _v12_mode = bool(int(os.environ.get("BUILD_V12_MODE", "0")))
+        # V11 (legacy) : training REALISTE avec snapshots K = [3, 7, 15].
+        # Voit jusqu'a 15 bougies post-validation -> data leakage identifie
+        # par le user le 22/05 : le ML apprend a noter un OB sur le mouvement
+        # post-OB, ce qui le fait entrer trop tard en live.
+        SNAPSHOTS_K = [3, 7, 15] if not _v12_mode else [0]  # [0] = mode V12 amont
         for ob in prefiltered_obs:
             # Verdict pipeline calcule UNE FOIS sur le df complet (Vizion
             # eliminatoires : bias, KZ, phase, etc. ne changent pas avec K).
@@ -337,14 +345,20 @@ def _process_instrument(args):
             mss_full = mss_setups or []
 
             for K in SNAPSHOTS_K:
-                cut_idx = vi + 1 + K
+                # V12 (K=0) : cache strictement AMONT (<= vi, la bougie de validation
+                # est incluse car c'est la cassure qui valide l'OB, mais rien apres).
+                # V11 (K=3,7,15) : cache inclut K bougies POST-validation (leakage).
+                if _v12_mode:
+                    cut_idx = vi + 1  # df_ltf_K = bougies <= vi (validation incluse)
+                else:
+                    cut_idx = vi + 1 + K
                 # Skip si pas assez de bougies futures (fin de chunk)
                 if cut_idx > len(df_ltf_w):
                     continue
                 df_ltf_K = df_ltf_w.iloc[:cut_idx]
-                # Filtre les calculs du cache : un swing/etc. n'est "vu" au snapshot
-                # K que s'il a eu ses N bougies de confirmation (strength).
-                # Marge de securite : swing.index + strength + 1 <= cut_idx.
+                # Filtre les calculs du cache. En V12 (cut_idx = vi+1), un swing/FVG/etc.
+                # n'est "vu" QUE s'il etait deja confirme AVANT la validation de l'OB.
+                # En V11, idem mais avec une marge de K bougies post-validation.
                 swings_K = [s for s in swings_full if s.index + sws_ltf + 1 <= cut_idx]
                 # FVG : 3 bougies. Visible si center_index + 1 <= cut_idx.
                 fvgs_K = [f for f in fvgs_full if f.center_index + 1 <= cut_idx]
@@ -385,7 +399,10 @@ def _process_instrument(args):
 
                 f = _extract_features(r_K, ob, inst, df_ltf=df_ltf_K, df_d1=df_d1,
                                       df_htf=df_htf, mss_setups=mss_K)
-                f["snapshot_k"] = K
+                # V11 : on ajoute snapshot_k comme feature (3 lignes par OB).
+                # V12 : pas de snapshot_k (= marqueur du leakage). 1 ligne par OB.
+                if not _v12_mode:
+                    f["snapshot_k"] = K
                 f["outcome"] = outcome
                 f["pnl_usd"] = pnl_usd
                 f["bars_to_exit"] = bars_to_exit
