@@ -320,30 +320,52 @@ def _process_instrument(args):
                 pnl_usd = 0.0
                 bars_to_exit = None
 
-            # Pour chaque snapshot K : recalcule les features avec df tronque
+            # Pour chaque snapshot K : reutilise les calculs du df complet,
+            # filtres par index <= cut_idx (le snapshot ne voit que le passe+K).
+            # OPTIM V11 : au lieu de recalculer swings/fvgs/breakers/MSS pour
+            # chaque K (3x trop lent), on FILTRE les listes pre-calculees du
+            # df complet (cache 'cache' deja prepare a l'entree du _process_instrument).
+            # Un swing/FVG/breaker apparu apres cut_idx n'est pas visible "live a +K".
             vi = ob.validation_index
+            sws_ltf = swing_strength_ltf
+            # Pre-calcule les listes du cache 1 fois (sont dans cache deja)
+            swings_full = cache.get("swings_ltf", [])
+            fvgs_full = cache.get("fvgs_ltf", [])
+            breakers_full = cache.get("breakers_ltf", [])
+            structure_full = cache.get("structure_breaks", [])
+            # Aussi mss_setups passe en parametre
+            mss_full = mss_setups or []
+
             for K in SNAPSHOTS_K:
                 cut_idx = vi + 1 + K
                 # Skip si pas assez de bougies futures (fin de chunk)
                 if cut_idx > len(df_ltf_w):
                     continue
                 df_ltf_K = df_ltf_w.iloc[:cut_idx]
-                # MSS recalcule sur le df tronque (cache aussi)
+                # Filtre les calculs du cache : un swing/etc. n'est "vu" au snapshot
+                # K que s'il a eu ses N bougies de confirmation (strength).
+                # Marge de securite : swing.index + strength + 1 <= cut_idx.
+                swings_K = [s for s in swings_full if s.index + sws_ltf + 1 <= cut_idx]
+                # FVG : 3 bougies. Visible si center_index + 1 <= cut_idx.
+                fvgs_K = [f for f in fvgs_full if f.center_index + 1 <= cut_idx]
+                # Breaker : visible si inverse_index <= cut_idx.
+                breakers_K = [b for b in breakers_full if b.inverse_index <= cut_idx]
+                # Structure breaks : visible si break_index <= cut_idx.
+                structure_K = [sb for sb in structure_full if sb.break_index <= cut_idx]
+                # MSS : visible si retest_index <= cut_idx (la confirmation finale).
+                mss_K = [m for m in mss_full if m.retest_index is not None and m.retest_index <= cut_idx]
+                # htf_trend recalcule sur swings filtres (rapide, juste lookback=6)
                 try:
-                    swings_K = find_swings(df_ltf_K, strength=swing_strength_ltf)
-                    fvgs_K = detect_fvg(df_ltf_K)
-                    breakers_K = detect_breakers(df_ltf_K)
-                    structure_K = detect_structure_breaks(df_ltf_K, swings=swings_K, fvgs=fvgs_K)
-                    mss_K = detect_mss_setups(df_ltf_K, structure_breaks=structure_K, swings=swings_K, fvgs=fvgs_K)
-                    cache_K = {
-                        "swings_ltf": swings_K, "fvgs_ltf": fvgs_K,
-                        "breakers_ltf": breakers_K, "structure_breaks": structure_K,
-                        "obs_htf": cache.get("obs_htf"),
-                        "obs_htf2": cache.get("obs_htf2"),
-                        "htf_trend": detect_trend(swings_K, lookback=6),
-                    }
+                    htf_trend_K = detect_trend(swings_K, lookback=6)
                 except Exception:
-                    continue
+                    htf_trend_K = cache.get("htf_trend")
+                cache_K = {
+                    "swings_ltf": swings_K, "fvgs_ltf": fvgs_K,
+                    "breakers_ltf": breakers_K, "structure_breaks": structure_K,
+                    "obs_htf": cache.get("obs_htf"),
+                    "obs_htf2": cache.get("obs_htf2"),
+                    "htf_trend": htf_trend_K,
+                }
 
                 r_K = evaluate_ob(
                     ob, df_ltf_K, df_htf, df_d1, inst,
