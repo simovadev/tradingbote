@@ -197,7 +197,12 @@ class MT5Executor:
             except Exception:
                 pass
 
-        rates = mt5.copy_rates_from_pos(broker_sym, TF_MAP[tf], 0, n)
+        # FIX V11.4 (2026-05-22) : pos=1 au lieu de pos=0.
+        # pos=0 inclut la bougie EN COURS (non fermee) qui evolue chaque tick.
+        # Causait divergence ML live (features sur close partiel) vs OOS (close final)
+        # -> trades pris sur OB fantome -> WR 23% live vs 80% OOS.
+        # Diagnostic 22/05 : USDCHF SL ML=0.755 live vs 0.296 recompute apres fermeture.
+        rates = mt5.copy_rates_from_pos(broker_sym, TF_MAP[tf], 1, n)
         if rates is None or len(rates) == 0:
             log.debug(f"Pas de data pour {symbol} {tf} : {mt5.last_error()}")
             return None
