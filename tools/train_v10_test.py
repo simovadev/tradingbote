@@ -1,13 +1,13 @@
-"""Train V10 TEST : compare configs hyperparametres LightGBM sur dataset test.
+"""Train V10 TEST : compare 4 datasets (RR x SWS) x 4 configs hyperparametres.
 
-Charge les datasets V10 test (3 actifs, 1 an), split train/OOS, et teste
-plusieurs configs pour voir laquelle donne le plus de trades a WR maintenu.
+Pour chaque combo : split train/OOS, AUC, et surtout nb de trades + WR
+a chaque seuil. But : trouver la combinaison qui maximise le VOLUME de
+trades a WR maintenu (>= ~65%).
 
-Usage : python tools/train_v10_test.py [suffix_dataset]
-  suffix = rr20 ou rr15 (defaut rr20)
+Usage : python tools/train_v10_test.py
 """
 from __future__ import annotations
-import json, sys
+import sys
 from pathlib import Path
 import lightgbm as lgb
 import pandas as pd
@@ -19,70 +19,115 @@ sys.path.insert(0, str(ROOT))
 TEST_ASSETS = ["XAUUSD", "EURUSD", "NAS100"]
 NON_FEATURES = {"instrument", "ts", "direction", "outcome", "pnl_usd", "bars_to_exit", "target"}
 
-# Configs a tester
+# 4 datasets : RR x SWS
+DATASETS = {
+    "RR2.0/swsDEF": "rr20_swsdef",
+    "RR2.0/sws1":   "rr20_sws1",
+    "RR1.5/swsDEF": "rr15_swsdef",
+    "RR1.5/sws1":   "rr15_sws1",
+}
+
 CONFIGS = {
-    "V9_baseline": dict(n_estimators=300, learning_rate=0.05, max_depth=6,
-                        num_leaves=31, min_child_samples=20, subsample=0.8,
-                        colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1),
-    "deeper": dict(n_estimators=500, learning_rate=0.03, max_depth=9,
-                   num_leaves=63, min_child_samples=30, subsample=0.8,
-                   colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1),
-    "balanced": dict(n_estimators=400, learning_rate=0.04, max_depth=7,
-                     num_leaves=47, min_child_samples=25, subsample=0.8,
-                     colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1,
-                     class_weight="balanced"),
-    "more_trees": dict(n_estimators=800, learning_rate=0.02, max_depth=7,
-                       num_leaves=47, min_child_samples=20, subsample=0.85,
-                       colsample_bytree=0.85, reg_alpha=0.05, reg_lambda=0.05),
+    "V9_base":   dict(n_estimators=300, learning_rate=0.05, max_depth=6,
+                      num_leaves=31, min_child_samples=20, subsample=0.8,
+                      colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1),
+    "deeper":    dict(n_estimators=500, learning_rate=0.03, max_depth=9,
+                      num_leaves=63, min_child_samples=30, subsample=0.8,
+                      colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1),
+    "balanced":  dict(n_estimators=400, learning_rate=0.04, max_depth=7,
+                      num_leaves=47, min_child_samples=25, subsample=0.8,
+                      colsample_bytree=0.8, reg_alpha=0.1, reg_lambda=0.1,
+                      class_weight="balanced"),
+    "more_tree": dict(n_estimators=800, learning_rate=0.02, max_depth=7,
+                      num_leaves=47, min_child_samples=20, subsample=0.85,
+                      colsample_bytree=0.85, reg_alpha=0.05, reg_lambda=0.05),
 }
 
 
-def load_ds(asset, suffix):
-    p = ROOT / f"data/ml_dataset_{asset}_v10test_{suffix}.parquet"
-    if not p.exists():
-        return None
-    df = pd.read_parquet(p)
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    return df[df["outcome"].isin(["WIN", "LOSS"])].sort_values("ts").reset_index(drop=True)
+def load_combined(suffix):
+    """Charge et concatene les 3 actifs pour un dataset donne."""
+    parts = []
+    for a in TEST_ASSETS:
+        p = ROOT / f"data/ml_dataset_{a}_v10test_{suffix}.parquet"
+        if not p.exists():
+            return None
+        df = pd.read_parquet(p)
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+        df = df[df["outcome"].isin(["WIN", "LOSS"])]
+        parts.append(df)
+    return pd.concat(parts, ignore_index=True).sort_values("ts").reset_index(drop=True)
+
+
+def evaluate(df, params):
+    """Train sur 75%, eval sur 25% OOS. Retourne (auc, {seuil: (n, wr, pnl)})."""
+    cut = df["ts"].quantile(0.75)
+    tr = df[df["ts"] < cut].copy()
+    oos = df[df["ts"] >= cut].copy()
+    feats = [c for c in df.columns if c not in NON_FEATURES]
+    for sub in (tr, oos):
+        for c in feats:
+            if sub[c].dtype == bool:
+                sub[c] = sub[c].astype(int)
+    Xtr, ytr = tr[feats], (tr["outcome"] == "WIN").astype(int)
+    Xoos, yoos = oos[feats], (oos["outcome"] == "WIN").astype(int)
+    m = lgb.LGBMClassifier(**params, random_state=42, verbosity=-1)
+    m.fit(Xtr, ytr)
+    proba = m.predict_proba(Xoos)[:, 1]
+    auc = roc_auc_score(yoos, proba)
+    oos = oos.assign(proba=proba, win=yoos.values)
+    res = {}
+    n_months = (oos["ts"].max() - oos["ts"].min()).days / 30.0
+    for thr in (0.55, 0.60, 0.65, 0.70):
+        sel = oos[oos["proba"] >= thr]
+        n = len(sel)
+        wr = sel["win"].mean() * 100 if n else 0
+        pnl = sel["pnl_usd"].sum() if n else 0
+        tpm = n / n_months if n_months > 0 else 0
+        res[thr] = (n, wr, pnl, tpm)
+    return auc, res, len(feats)
 
 
 def main():
-    suffix = sys.argv[1] if len(sys.argv) > 1 else "rr20"
-    print(f"=== TRAIN V10 TEST | dataset suffix={suffix} ===\n")
+    print("=" * 95)
+    print("TRAIN V10 TEST - 4 datasets x 4 configs (3 actifs, 1 an, OOS 25%)")
+    print("=" * 95)
 
-    for asset in TEST_ASSETS:
-        df = load_ds(asset, suffix)
-        if df is None or len(df) < 200:
-            print(f"{asset} : dataset absent ou trop court, skip\n")
+    best = None
+    for ds_label, suffix in DATASETS.items():
+        df = load_combined(suffix)
+        if df is None:
+            print(f"\n### {ds_label} : dataset manquant, skip")
             continue
-
-        # Split 75% train / 25% OOS temporel
-        cut = df["ts"].quantile(0.75)
-        tr = df[df["ts"] < cut].copy()
-        oos = df[df["ts"] >= cut].copy()
-        feats = [c for c in df.columns if c not in NON_FEATURES]
-        for sub in (tr, oos):
-            for c in feats:
-                if sub[c].dtype == bool:
-                    sub[c] = sub[c].astype(int)
-        Xtr, ytr = tr[feats], (tr["outcome"] == "WIN").astype(int)
-        Xoos, yoos = oos[feats], (oos["outcome"] == "WIN").astype(int)
-
-        print(f"### {asset}  (train {len(tr)}, OOS {len(oos)}, {len(feats)} features)")
-        print(f"  {'config':14s} {'AUC':>7s} {'>=0.6 n/WR':>14s} {'>=0.65 n/WR':>14s} {'>=0.70 n/WR':>14s}")
-        for name, params in CONFIGS.items():
-            m = lgb.LGBMClassifier(**params, random_state=42, verbosity=-1)
-            m.fit(Xtr, ytr)
-            proba = m.predict_proba(Xoos)[:, 1]
-            auc = roc_auc_score(yoos, proba)
+        print(f"\n### DATASET {ds_label}  ({len(df):,} trades fermes)")
+        print(f"  {'config':12s} {'AUC':>6s} {'feats':>6s} | "
+              f"{'@0.60 tpm/WR':>15s} {'@0.65 tpm/WR':>15s} {'@0.70 tpm/WR':>15s}")
+        for cfg_name, params in CONFIGS.items():
+            try:
+                auc, res, nfeat = evaluate(df, params)
+            except Exception as e:
+                print(f"  {cfg_name:12s} ERREUR {e}")
+                continue
             cells = []
             for thr in (0.60, 0.65, 0.70):
-                sel = proba >= thr
-                n = int(sel.sum())
-                wr = float(yoos[sel].mean() * 100) if n else 0
-                cells.append(f"{n:>4}/{wr:>5.1f}%")
-            print(f"  {name:14s} {auc:>7.3f} {cells[0]:>14s} {cells[1]:>14s} {cells[2]:>14s}")
-        print()
+                n, wr, pnl, tpm = res[thr]
+                cells.append(f"{tpm:>5.1f}/{wr:>5.1f}%")
+            print(f"  {cfg_name:12s} {auc:>6.3f} {nfeat:>6d} | "
+                  f"{cells[0]:>15s} {cells[1]:>15s} {cells[2]:>15s}")
+            # Score : volume a 0.65 x WR (compromis)
+            n65, wr65, pnl65, tpm65 = res[0.65]
+            if wr65 >= 63 and tpm65 >= 10:
+                score = tpm65 * wr65
+                if best is None or score > best[0]:
+                    best = (score, ds_label, cfg_name, auc, tpm65, wr65, pnl65)
+
+    print("\n" + "=" * 95)
+    if best:
+        print(f"MEILLEUR COMBO (volume x WR @0.65, WR>=63%) :")
+        print(f"  Dataset : {best[1]}")
+        print(f"  Config  : {best[2]}")
+        print(f"  AUC={best[3]:.3f} | {best[4]:.1f} trades/mois @0.65 | WR {best[5]:.1f}% | PnL {best[6]:+.0f}")
+    else:
+        print("Aucun combo avec WR>=63% et volume>=10/mois")
 
 
 if __name__ == "__main__":
