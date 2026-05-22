@@ -22,7 +22,11 @@ import argparse
 import os
 import sys
 import time
+import multiprocessing as _mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
+# spawn au lieu de fork : evite les crashes silencieux quand les workers
+# importent lightgbm/sklearn (mauvais fork-safe par defaut sur Linux).
+_mp.set_start_method("spawn", force=True)
 
 os.environ.setdefault("SWS_OVERRIDE", "1")
 os.environ.setdefault("RR_OVERRIDE", "1.5")
@@ -42,31 +46,46 @@ LIVE_ASSETS = [
 
 
 def backtest_task(args_tuple):
-    """Worker : run backtest pour 1 actif x 1 sous-periode."""
+    """Worker : run backtest pour 1 actif x 1 sous-periode.
+
+    En mode spawn, les imports se font dans le worker -> tout doit etre
+    re-importe localement, et on attrape TOUT en haut pour ne pas crash silencieux.
+    """
     asset, start_str, end_str, step, task_id = args_tuple
-    os.environ.setdefault("SWS_OVERRIDE", "1")
-    os.environ.setdefault("RR_OVERRIDE", "1.5")
-    os.environ.setdefault("BUILD_DATA_DIR", "data_vantage")
-    import sys as _sys
-    _sys.path.insert(0, ROOT)
-    import pandas as _pd
-    import time as _t
-
-    from backtest_v12_realistic import run_backtest
-
-    start = _pd.Timestamp(start_str, tz="UTC")
-    end = _pd.Timestamp(end_str, tz="UTC")
-    if end.hour == 0 and end.minute == 0:
-        end = end + _pd.Timedelta(hours=23, minutes=59)
-
-    t0 = _t.time()
     try:
-        trades, stats = run_backtest(start, end, [asset], scan_step_min=step)
+        # Force BLAS 1 thread (au cas ou pas hérité)
+        os.environ["OMP_NUM_THREADS"] = "1"
+        os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        os.environ["MKL_NUM_THREADS"] = "1"
+        os.environ["NUMEXPR_NUM_THREADS"] = "1"
+        os.environ.setdefault("SWS_OVERRIDE", "1")
+        os.environ.setdefault("RR_OVERRIDE", "1.5")
+        os.environ.setdefault("BUILD_DATA_DIR", "data_vantage")
+        import sys as _sys
+        _sys.path.insert(0, ROOT)
+        import pandas as _pd
+        import time as _t
+        import traceback as _tb
+
+        from backtest_v12_realistic import run_backtest
+
+        start = _pd.Timestamp(start_str, tz="UTC")
+        end = _pd.Timestamp(end_str, tz="UTC")
+        if end.hour == 0 and end.minute == 0:
+            end = end + _pd.Timedelta(hours=23, minutes=59)
+
+        t0 = _t.time()
+        try:
+            trades, stats = run_backtest(start, end, [asset], scan_step_min=step)
+        except Exception as e:
+            return {"task_id": task_id, "asset": asset, "start": start_str, "end": end_str,
+                    "ok": False, "error": str(e)[:200], "trace": _tb.format_exc()[-500:]}
+        elapsed = _t.time() - t0
     except Exception as e:
-        import traceback
+        import traceback as _tb_outer
         return {"task_id": task_id, "asset": asset, "start": start_str, "end": end_str,
-                "ok": False, "error": str(e), "trace": traceback.format_exc()[-500:]}
-    elapsed = _t.time() - t0
+                "ok": False, "error": f"WORKER INIT FAIL: {e}",
+                "trace": _tb_outer.format_exc()[-500:]}
 
     # Sauve CSV (1 par tache)
     out = f"{ROOT}/data/bt_v12_{asset}_{task_id:03d}.csv"
