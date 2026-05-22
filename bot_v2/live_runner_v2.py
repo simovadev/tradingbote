@@ -439,16 +439,12 @@ def compute_asset(payload: dict) -> dict:
         # V5.1 : virer filtre dur confirm_ob_with_mss (le ML decide via has_mss_nearby).
         obs_confirmed = obs
 
-        # Filtre : OB des 60 dernieres minutes.
-        # FIX V8 (2026-05-21) : recent_cutoff remis a 60min (etait 3min -> BUG).
-        # Avec 3min le bot ne voyait qu'un OB ultra-frais par cycle et ratait
-        # tous les OB qui atteignent ML>=0.75 quelques minutes apres leur
-        # validation (quand le contexte se developpe). Resultat : 0 trade en
-        # live alors que le backtest 24h trouve ~23 trades/jour.
-        # Avec 60min : le bot re-evalue tous les OB recents a chaque cycle,
-        # place le trade des qu'un atteint le seuil. _seen_setups dedoublonne.
+        # Filtre : OB des 30 dernieres minutes (aligne sur OOS max_bars_to_fill=30).
+        # FIX V11.2 (2026-05-22) : passe de 60min a 30min. Le OOS abandonne
+        # un OB qui n'a pas fill en 30min (NO_FILL). Au-dela, mouvement consomme,
+        # contexte change -> SL frequents (cf 9 LOSS / 12 trades du 22/05).
         now = df_m1.index[-1]
-        recent_cutoff = now - pd.Timedelta(minutes=60)
+        recent_cutoff = now - pd.Timedelta(minutes=30)
         obs_recent = [
             ob for ob in obs_confirmed
             if df_m1.index[ob.validation_index] >= recent_cutoff
@@ -776,12 +772,12 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # Le ML decide via feature has_mss_nearby (aligne avec V5 training).
     obs_confirmed = obs
 
-    # 3. Filtre : OB des 60 dernieres minutes.
-    # FIX V8 (2026-05-21) : recent_cutoff remis a 60min (etait 3min -> BUG).
-    # 3min = le bot ratait tous les OB atteignant ML>=0.75 quelques minutes
+    # 3. Filtre : OB des 30 dernieres minutes.
+    # FIX V11.2 (2026-05-22) : passe de 60min a 30min (aligne OOS).
+    # Le OOS abandonne un OB non-fill en 30min. Le live faisait pareil
     # apres validation -> 0 trade en live vs ~23/jour en backtest.
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=60)
+    recent_cutoff = now - pd.Timedelta(minutes=30)
     obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
 
     if debug_diag:
@@ -934,15 +930,20 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     setup = r.trade_setup
 
     # === Age du setup ===
-    # FIX V8 (2026-05-21) : seuil 3min -> 60min (aligne sur recent_cutoff).
-    # 3min rejetait structurellement tous les bons setups : un OB ICT met
-    # 20-40 min a murir (retest -> proba ML monte au seuil). Le commentaire
-    # ci-dessous confirme qu'il n'y a aucun risque a placer le LIMIT meme si
-    # l'OB a quelques dizaines de minutes (LIMIT au prix OB, fill seulement
-    # si le prix revient toucher entry, sinon expire). 60min = coherent.
+    # FIX V11.2 (2026-05-22) : seuil age max ALIGNE SUR LE OOS.
+    # backtest.simulate_trade utilise max_bars_to_fill=30 (= 30 bougies M1).
+    # Au-dela de 30 min apres validation, l'OOS marque NO_FILL et abandonne.
+    # Le live doit faire pareil sinon il place des pending sur des OBs perimes
+    # (mouvement consomme, contexte change) -> SL frequents.
+    #
+    # Diagnostic 22/05 : 9 LOSS / 12 trades en session London. La majorite
+    # des LOSS avaient un age_setup entre 30 et 47 min. Le OOS n'aurait
+    # JAMAIS tente ces trades (NO_FILL des le passage des 30 min).
+    #
+    # Avant : seuil 60min. Maintenant : 30min (= max_bars_to_fill du OOS).
     age_setup_min = (pd.Timestamp.now(tz="UTC") - ob.validation_ts).total_seconds() / 60
-    if age_setup_min > 60:
-        log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP")
+    if age_setup_min > 30:
+        log.warning(f"SETUP TROP VIEUX {instrument} : validation il y a {age_setup_min:.1f} min, SKIP (OOS rejet a 30min)")
         return False
 
     # === FIX V10.1 (2026-05-22) : garde-fou "mouvement deja consomme" ===
@@ -1805,15 +1806,12 @@ def run_live(test_dry_run: bool = False):
     if test_dry_run:
         log.info("** MODE DRY RUN - aucun ordre ne sera place **")
 
-    # FIX V8 (2026-05-21) : BOT_START_TS aligne sur recent_cutoff (60min).
-    # Avant : now - 1min -> au redemarrage, le bot ignorait pendant 1h tous les
-    # OB que recent_cutoff lui montrait (ceux valides avant le boot) -> un OB
-    # mur a ML 0.759 detecte comme SETUP mais jamais execute.
-    # Maintenant : now - 60min -> le bot peut trader tout OB de la derniere
-    # heure des le boot (coherent avec recent_cutoff). _seen_setups + le cap
-    # recent_cutoff empechent de trader du vraiment vieux.
-    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=60)
-    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs a -60min ignores)")
+    # FIX V11.2 (2026-05-22) : BOT_START_TS aligne sur recent_cutoff (30min).
+    # On veut que le bot puisse trader les OB de la derniere demi-heure (= la
+    # meme fenetre que le OOS max_bars_to_fill). Au-dela, l'OOS marque NO_FILL,
+    # donc le live aussi.
+    BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=30)
+    log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs a -30min ignores - aligne OOS)")
 
     # V5.4 : init DataBuffer pour chaque actif (charge parquet 7mois + comble trou via MT5)
     log.info("=" * 70)
