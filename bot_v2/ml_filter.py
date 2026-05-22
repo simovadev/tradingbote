@@ -64,27 +64,28 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
     ("NAS100", "M5"): Path("c:/Users/Shadow/TradingBot/bot_v2/ml_features_NAS100_M5.json"),
 }
 
-# V11 thresholds (user 2026-05-22) - seuil 0.65 partout pour la session London.
-# V11 OOS @0.65 : ~7500 trades sur 6 mois soit ~42/jour, WR ~78% (3 actifs cumules).
-# Choix user : on baisse de 0.70 a 0.65 pour avoir plus de volume en live et
-# tester si V11 trouve assez de trades (semaine V10 = sous-trade chronique).
-# A remonter a 0.70 si le bot prend trop de trades (saturation MAX_CONCURRENT)
-# ou si le WR live tombe sous 70%.
+# V11.3 thresholds (user 2026-05-22) - seuil 0.70 partout (retour valeur cible).
+# Test session London 07-13 UTC simule :
+#   @0.65 : 10 trades, WR 57% (4 WIN/3 LOSS/3 NO_FILL)
+#   @0.70 : 7 trades,  WR 80% (4 WIN/1 LOSS/2 NO_FILL)  <- meilleur ratio
+#   @0.75 : 2 trades,  WR 100% (trop strict)
+# Avec V11.2 (cap age 30min aligne OOS), 0.70 donne le meilleur compromis
+# volume/WR. Conforme aux chiffres OOS V11 (WR ~81% au seuil 0.70).
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.65,
-    "NAS100": 0.65,
-    "GER40":  0.65,
-    "BTCUSD": 0.65,
-    "EURUSD": 0.65,
-    "GBPUSD": 0.65,
-    "AUDUSD": 0.65,
-    "USDJPY": 0.65,
-    "SP500":  0.65,
-    "DJ30":   0.65,
-    "UK100":  0.65,
-    "FRA40":  0.65,
-    "USDCAD": 0.65,
-    "USDCHF": 0.65,
+    "XAUUSD": 0.70,
+    "NAS100": 0.70,
+    "GER40":  0.70,
+    "BTCUSD": 0.70,
+    "EURUSD": 0.70,
+    "GBPUSD": 0.70,
+    "AUDUSD": 0.70,
+    "USDJPY": 0.70,
+    "SP500":  0.70,
+    "DJ30":   0.70,
+    "UK100":  0.70,
+    "FRA40":  0.70,
+    "USDCAD": 0.70,
+    "USDCHF": 0.70,
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {
