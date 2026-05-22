@@ -268,8 +268,18 @@ def _process_instrument(args):
         prefiltered_mss = []
 
         rows = []
+        # V11 (2026-05-22) : training REALISTE.
+        # Au lieu d'evaluer chaque OB 1 fois avec le df complet (features
+        # matures qui n'existeront pas en live), on l'evalue a plusieurs
+        # snapshots K = [3, 7, 15] bougies M1 apres validation. Le ML voit
+        # le meme OB sous 3 angles "comme en live a +K min". Resout la
+        # divergence training/live (cf bug USDCHF : training=0.28, live=0.60).
+        # Le label (WIN/LOSS) est calcule sur le df complet (verite terrain).
+        SNAPSHOTS_K = [3, 7, 15]
         for ob in prefiltered_obs:
-            r = evaluate_ob(
+            # Verdict pipeline calcule UNE FOIS sur le df complet (Vizion
+            # eliminatoires : bias, KZ, phase, etc. ne changent pas avec K).
+            r_full = evaluate_ob(
                 ob, df_ltf_w, df_htf, df_d1, inst,
                 ltf_name=ltf_name, htf_name=htf_name,
                 df_htf2=df_htf2, htf2_name=htf2_name,
@@ -279,45 +289,85 @@ def _process_instrument(args):
                 min_score=0, min_quality=0,
                 cache=cache,
             )
-            # On garde uniquement les OB qui passent les regles Vizion ELIMINATOIRES
-            # (bias daily contraire, hors KZ, phase A/M, displacement faible, etc.)
-            # Ces "vrais candidats" sont ce que le ML va apprendre a filtrer
-            if r.verdict != "TRADE":
-                continue
-            if r.trade_setup is None:
+            if r_full.verdict != "TRADE" or r_full.trade_setup is None:
                 continue
 
-            f = _extract_features(r, ob, inst, df_ltf=df_ltf_w, df_d1=df_d1, df_htf=df_htf, mss_setups=mss_setups)
-
-            # Simulate trade pour avoir l'outcome
+            # Outcome = realite finale (calculee une fois)
             try:
-                setup = r.trade_setup
+                setup_full = r_full.trade_setup
                 lots, risk_usd = compute_position_size(
-                    setup.entry_price, setup.stop_loss, inst,
+                    setup_full.entry_price, setup_full.stop_loss, inst,
                     balance=60.0, risk_pct=0.10,
                 )
                 if lots <= 0:
                     continue
                 sim_setup = TradeSetup(
-                    instrument=inst, direction=setup.direction,
-                    entry_price=setup.entry_price, stop_loss=setup.stop_loss,
-                    take_profit=setup.take_profit, rr=setup.rr,
-                    risk_points=setup.risk_points, reward_points=setup.reward_points,
-                    risk_usd=risk_usd, reward_usd=risk_usd * setup.rr,
+                    instrument=inst, direction=setup_full.direction,
+                    entry_price=setup_full.entry_price, stop_loss=setup_full.stop_loss,
+                    take_profit=setup_full.take_profit, rr=setup_full.rr,
+                    risk_points=setup_full.risk_points, reward_points=setup_full.reward_points,
+                    risk_usd=risk_usd, reward_usd=risk_usd * setup_full.rr,
                     position_size_lots=lots,
-                    ob_validation_ts=setup.ob_validation_ts,
-                    tp_source=setup.tp_source,
+                    ob_validation_ts=setup_full.ob_validation_ts,
+                    tp_source=setup_full.tp_source,
                 )
                 tr = simulate_trade(sim_setup, df_ltf_w, ob.validation_index + 1)
-                f["outcome"] = tr.outcome  # "WIN" | "LOSS" | "NO_FILL" | "PENDING"
-                f["pnl_usd"] = tr.pnl_usd
-                f["bars_to_exit"] = (tr.exit_index - tr.fill_index) if (tr.exit_index and tr.fill_index) else None
-            except Exception as e:
-                f["outcome"] = "ERROR"
-                f["pnl_usd"] = 0.0
-                f["bars_to_exit"] = None
+                outcome = tr.outcome
+                pnl_usd = tr.pnl_usd
+                bars_to_exit = (tr.exit_index - tr.fill_index) if (tr.exit_index and tr.fill_index) else None
+            except Exception:
+                outcome = "ERROR"
+                pnl_usd = 0.0
+                bars_to_exit = None
 
-            rows.append(f)
+            # Pour chaque snapshot K : recalcule les features avec df tronque
+            vi = ob.validation_index
+            for K in SNAPSHOTS_K:
+                cut_idx = vi + 1 + K
+                # Skip si pas assez de bougies futures (fin de chunk)
+                if cut_idx > len(df_ltf_w):
+                    continue
+                df_ltf_K = df_ltf_w.iloc[:cut_idx]
+                # MSS recalcule sur le df tronque (cache aussi)
+                try:
+                    swings_K = find_swings(df_ltf_K, strength=swing_strength_ltf)
+                    fvgs_K = detect_fvg(df_ltf_K)
+                    breakers_K = detect_breakers(df_ltf_K)
+                    structure_K = detect_structure_breaks(df_ltf_K, swings=swings_K, fvgs=fvgs_K)
+                    mss_K = detect_mss_setups(df_ltf_K, structure_breaks=structure_K, swings=swings_K, fvgs=fvgs_K)
+                    cache_K = {
+                        "swings_ltf": swings_K, "fvgs_ltf": fvgs_K,
+                        "breakers_ltf": breakers_K, "structure_breaks": structure_K,
+                        "obs_htf": cache.get("obs_htf"),
+                        "obs_htf2": cache.get("obs_htf2"),
+                        "htf_trend": detect_trend(swings_K, lookback=6),
+                    }
+                except Exception:
+                    continue
+
+                r_K = evaluate_ob(
+                    ob, df_ltf_K, df_htf, df_d1, inst,
+                    ltf_name=ltf_name, htf_name=htf_name,
+                    df_htf2=df_htf2, htf2_name=htf2_name,
+                    correlated_dfs=correlated_dfs,
+                    htf_swings=htf_swings,
+                    df_h1=df_h1_for_feu_vert,
+                    min_score=0, min_quality=0,
+                    cache=cache_K,
+                )
+                if r_K.verdict != "TRADE" or r_K.trade_setup is None:
+                    # L'OB ne passe pas le pipeline avec le df tronque (ex: range
+                    # Fibo pas calculable au snapshot K). Skip ce snapshot, mais
+                    # on garde les autres.
+                    continue
+
+                f = _extract_features(r_K, ob, inst, df_ltf=df_ltf_K, df_d1=df_d1,
+                                      df_htf=df_htf, mss_setups=mss_K)
+                f["snapshot_k"] = K
+                f["outcome"] = outcome
+                f["pnl_usd"] = pnl_usd
+                f["bars_to_exit"] = bars_to_exit
+                rows.append(f)
 
         # =============== BOUCLE MSS SETUPS ===============
         # Les MSS sont evalues SANS filtre daily_bias (user 2026-05-16).
