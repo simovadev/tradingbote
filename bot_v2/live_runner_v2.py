@@ -141,6 +141,45 @@ DATA_BUFFERS: dict[str, "DataBuffer"] = {}
 # Pusher dashboard (module-global, init dans run_live, lu par execute_setup)
 _PUSHER: "DashboardPusher | None" = None
 
+# === V11.1 (2026-05-22) : tracker de stabilite des probas ML ===
+# Pour chaque OB, on garde l'historique des dernieres probas calculees.
+# On ne trade que si la proba est STABLE sur N cycles consecutifs (pas un
+# faux pic du a des features partielles).
+# Cle = (instrument, ob_validation_ts_str, direction). Valeur = liste des
+# (timestamp, proba) des dernieres evaluations.
+PROBA_HISTORY: dict[tuple, list[tuple[pd.Timestamp, float]]] = {}
+STABILITY_MIN_CYCLES = 2       # nb minimum d'evaluations consecutives
+STABILITY_MAX_GAP = 0.07       # ecart max entre min et max des dernieres probas
+
+
+def _is_stable(history: list[tuple[pd.Timestamp, float]], min_cycles: int = STABILITY_MIN_CYCLES,
+               max_gap: float = STABILITY_MAX_GAP) -> tuple[bool, str]:
+    """Retourne (True, '') si les dernieres probas sont stables, sinon (False, raison).
+
+    Logique : il faut au moins `min_cycles` evaluations recentes, et l'ecart
+    max-min entre ces probas doit etre <= max_gap.
+    """
+    if len(history) < min_cycles:
+        return False, f"only_{len(history)}_cycles"
+    recent = [p for _, p in history[-min_cycles:]]
+    gap = max(recent) - min(recent)
+    if gap > max_gap:
+        return False, f"unstable_gap_{gap:.2f}"
+    return True, ""
+
+
+def _cleanup_proba_history(now: pd.Timestamp, max_age_min: int = 30) -> None:
+    """Purge les entrees plus vieilles que max_age_min."""
+    cutoff = now - pd.Timedelta(minutes=max_age_min)
+    to_del = []
+    for key, hist in PROBA_HISTORY.items():
+        # Garde seulement les entrees recentes
+        hist[:] = [(ts, p) for ts, p in hist if ts >= cutoff]
+        if not hist:
+            to_del.append(key)
+    for key in to_del:
+        del PROBA_HISTORY[key]
+
 
 def get_risk_pct(balance: float) -> float:
     if balance < TEST_MODE_THRESHOLD:
@@ -167,22 +206,25 @@ BOT_V2_DIR = ROOT_DIR / "bot_v2"
 
 
 def load_model(instrument: str) -> tuple[Any, list[str]] | None:
-    """Charge le meilleur modele disponible : V10 > V9 > V8 > V7 > V5 > V4 > V3.5 > V2.
+    """Charge le meilleur modele disponible : V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3.5 > V2.
 
-    V10 (2026-05-22) : 15 nouvelles features (PO3 enrichi, momentum, displacement,
-    atr_regime), swing_strength=1 (+88% d'OB), RR=1.5, hyperparametres 'deeper'.
-    AUC OOS moy 0.741. WR@0.70 81%. Volume x2.5 vs V9. IMPORTANT : le live DOIT
-    tourner avec swing_strength=1 (cf SWS_OVERRIDE) pour voir les memes OB que
-    le dataset de training.
+    V11 (2026-05-22) : 'training realiste' - 3 snapshots par OB (K=3,7,15 min)
+    pour aligner training et live. Feature `snapshot_k` que le live remplit
+    avec l'age actuel de l'OB. Combine avec V11.1 check de stabilite des probas.
 
-    V9 (2026-05-22) : fix data leakages multiples (retests, MSS, FVG, breaker...).
-    V8 (2026-05-21) : fix data leakage PDH/PDL/D1_open uniquement.
+    V10 (2026-05-22) : 15 features (PO3 enrichi, momentum, displacement, atr_regime),
+    swing_strength=1, RR=1.5, hyperparametres 'deeper'.
+
+    V9 (2026-05-22) : fix data leakages multiples.
+    V8 (2026-05-21) : fix data leakage PDH/PDL/D1_open.
     """
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V10 > V9 > V8 > V7 > V5 Admiral > V4 > V3_5 > V2 legacy
+    # Cascade : V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v11.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v11.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v10.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_vantage_v10.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v9.pkl",
@@ -206,7 +248,9 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v10" in mp.name:
+            if "_vantage_v11" in mp.name:
+                version = "V11-Vantage-RealisticTraining"
+            elif "_vantage_v10" in mp.name:
                 version = "V10-Vantage-MoreVolume"
             elif "_vantage_v9" in mp.name:
                 version = "V9-Vantage-NoLeakage-FULL"
@@ -240,6 +284,16 @@ def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, m
     # FIX V5.1 (2026-05-20) : passer mss_setups pour la feature has_mss_nearby.
     # Sans ca, has_mss_nearby=0 toujours -> ML proba chute ~0.20 -> bot ne trade jamais.
     feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups)
+    # V11 : si le modele utilise snapshot_k (training realiste), on le remplit
+    # avec l'age REEL de l'OB en bougies M1 (capper aux valeurs du training).
+    if "snapshot_k" in features and df_ltf is not None and ob.validation_index is not None:
+        age_bars = len(df_ltf) - 1 - ob.validation_index
+        # Cap aux K du training : [3, 7, 15]. On prend le plus proche infERIEUR
+        # ou egal a l'age reel (sinon, le K le plus haut dispo).
+        if age_bars >= 15: snap_k = 15
+        elif age_bars >= 7: snap_k = 7
+        else: snap_k = 3
+        feats["snapshot_k"] = snap_k
     X = pd.DataFrame([[feats.get(f, 0) for f in features]], columns=features)
     return float(model.predict_proba(X)[0, 1])
 
@@ -837,6 +891,10 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                               ml_proba=proba, score=r.score)
             diag_reasons[f"ml_below_{threshold:.2f}"] = diag_reasons.get(f"ml_below_{threshold:.2f}", 0) + 1
             continue
+
+        # NB : le check de stabilite V11.1 se fait dans le MASTER (apres
+        # agregation des workers ProcessPool), pas ici. Cf bloc "WAIT_STABILITY"
+        # dans la boucle principale de run_live.
 
         valid_setups.append({
             "instrument": instrument,
@@ -1998,6 +2056,23 @@ def run_live(test_dry_run: bool = False):
 
                         setup_key = (asset, str(setup['ts']))
 
+                        # === V11.1 : check stabilite de la proba ML ===
+                        # Enregistre la proba actuelle pour cet OB et verifie qu'elle
+                        # est stable sur les dernieres evaluations. Evite les "faux pics"
+                        # causes par les features ML partielles juste apres validation.
+                        _proba_key = (asset, str(setup['ts']), setup['ob'].direction)
+                        PROBA_HISTORY.setdefault(_proba_key, []).append((now, float(setup['proba'])))
+                        if len(PROBA_HISTORY[_proba_key]) > 10:
+                            PROBA_HISTORY[_proba_key] = PROBA_HISTORY[_proba_key][-10:]
+                        is_stable, unstable_reason = _is_stable(PROBA_HISTORY[_proba_key])
+                        if not is_stable:
+                            recent = [f"{p:.2f}" for _, p in PROBA_HISTORY[_proba_key][-3:]]
+                            log.info(
+                                f"WAIT_STABILITY {asset} {setup['ob'].direction} "
+                                f"ts={setup['ts']} probas={recent} ({unstable_reason})"
+                            )
+                            continue
+
                         # Skip si deja vu il y a moins de 30 min
                         if setup_key in state._seen_setups:
                             last_seen = state._seen_setups[setup_key]
@@ -2008,7 +2083,7 @@ def run_live(test_dry_run: bool = False):
 
                         log.info(
                             f"SETUP {asset} {setup['ob'].direction} "
-                            f"ts={setup['ts']} ML={setup['proba']:.3f} score={setup['r'].score}"
+                            f"ts={setup['ts']} ML={setup['proba']:.3f} score={setup['r'].score} (STABLE)"
                         )
 
                         if test_dry_run:
