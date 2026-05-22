@@ -351,6 +351,70 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
         for mss in _mss_list
     ))
 
+    # ==================== NEW V10 FEATURES (2026-05-22) ====================
+    # Objectif : donner au ML des valeurs continues riches (avant : flags 0/1).
+    # L'analyse WR brut a montre que po3_dist (WR 46%) et le displacement sont
+    # les vrais discriminants - mais le ML ne voyait que des flags.
+
+    # --- Groupe A : PO3 enrichi (le signal en or) ---
+    f["po3_body_pct"] = float(getattr(r, "po3_body_pct", 0.5))
+    f["po3_upper_wick"] = float(getattr(r, "po3_upper_wick", 0.0))
+    f["po3_lower_wick"] = float(getattr(r, "po3_lower_wick", 0.0))
+    f["po3_aligned"] = int(getattr(r, "po3_aligned", 0))
+    f["po3_htf2_aligned"] = int(getattr(r, "po3_htf2_aligned", 0))
+
+    # --- Groupe B : displacement reel (deja calcule, jamais extrait avant) ---
+    f["displacement_ratio"] = float(getattr(r, "disp_ratio", 0.0))
+    f["fib_level"] = float(getattr(r, "fib_level", 0.5))
+
+    # --- Groupe C : momentum / regime de marche ---
+    idx = ob.validation_index
+    if df_ltf is not None and idx is not None and idx >= 240:
+        closes = df_ltf["close"]
+        c_now = float(closes.iloc[idx])
+        # Momentum : variation prix sur 60 et 240 bougies M1 (~1h et ~4h)
+        c_60 = float(closes.iloc[idx - 60])
+        c_240 = float(closes.iloc[idx - 240])
+        f["mom_60"] = (c_now - c_60) / c_60 * 100 if c_60 else 0.0
+        f["mom_240"] = (c_now - c_240) / c_240 * 100 if c_240 else 0.0
+        # Body ratio recent : marche directionnel (corps grands) ou choppy
+        sl20 = df_ltf.iloc[idx - 20:idx]
+        rng = (sl20["high"] - sl20["low"])
+        body = (sl20["close"] - sl20["open"]).abs()
+        f["body_ratio_recent"] = float((body / rng.replace(0, 1e-9)).mean())
+        # Momentum aligne avec la direction de l'OB ?
+        mom_dir = 1 if f["mom_60"] > 0 else -1
+        ob_dir = 1 if ob.direction == "bullish" else -1
+        f["mom_aligned"] = int(mom_dir == ob_dir)
+    else:
+        f["mom_60"] = 0.0
+        f["mom_240"] = 0.0
+        f["body_ratio_recent"] = 0.5
+        f["mom_aligned"] = 0
+
+    # --- Groupe D : regime de volatilite (calme vs agite) ---
+    if df_ltf is not None and idx is not None and idx >= 1440:
+        # ATR du "jour" (240 dernieres M1) vs ATR 30j (~43200 M1, cape a dispo)
+        sl_day = df_ltf.iloc[max(0, idx - 240):idx]
+        atr_day = float((sl_day["high"] - sl_day["low"]).mean())
+        n_long = min(idx, 43200)
+        sl_long = df_ltf.iloc[idx - n_long:idx]
+        atr_long = float((sl_long["high"] - sl_long["low"]).mean())
+        f["atr_regime"] = (atr_day / atr_long) if atr_long > 0 else 1.0
+    else:
+        f["atr_regime"] = 1.0
+
+    # --- Groupe E : distance aux niveaux daily en ATR (pas en %) ---
+    atr_ref = f.get("atr_at_setup", 0.0) or 0.0
+    if atr_ref > 0 and pdh and entry_price:
+        f["dist_pdh_atr"] = abs(entry_price - pdh) / atr_ref
+    else:
+        f["dist_pdh_atr"] = 0.0
+    if atr_ref > 0 and pdl and entry_price:
+        f["dist_pdl_atr"] = abs(entry_price - pdl) / atr_ref
+    else:
+        f["dist_pdl_atr"] = 0.0
+
     return f
 
 

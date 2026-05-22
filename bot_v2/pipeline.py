@@ -81,6 +81,15 @@ class PipelineResult:
     trade_setup: TradeSetup | None = None
     # Confluences textuelles
     confluences: list[str] = field(default_factory=list)
+    # V10 : valeurs continues riches exposees au ML (avant : perdues dans confluences)
+    disp_ratio: float = 0.0          # force du displacement de validation en xATR
+    vol_ratio: float = 1.0           # ATR14 / ATR100 (volatilite courte/longue)
+    po3_body_pct: float = 0.5        # corps / range de la bougie PO3 HTF
+    po3_upper_wick: float = 0.0      # meche haute PO3 (ratio range)
+    po3_lower_wick: float = 0.0      # meche basse PO3 (ratio range)
+    po3_aligned: int = 0             # PO3 sense == direction OB
+    po3_htf2_aligned: int = 0        # PO3 grand-parent aligne
+    fib_level: float = 0.5           # position de l'OB dans le range Fibo (0-1)
 
 
 def evaluate_ob(
@@ -248,6 +257,9 @@ def evaluate_ob(
             vol_ratio = atr_14 / atr_100
     res.confluences.append(f"displacement={disp_ratio:.2f}xATR")
     res.confluences.append(f"vol_ratio={vol_ratio:.2f}")
+    # V10 : expose les valeurs continues au ML
+    res.disp_ratio = float(disp_ratio)
+    res.vol_ratio = float(vol_ratio)
     # Bonus de score si displacement fort, malus si faible (mais pas REJET)
     if disp_ratio >= 1.0:
         res.score += 12
@@ -315,7 +327,10 @@ def evaluate_ob(
             or (ob.direction == "bearish" and fib_level >= 0.65)
         )
     else:
+        fib_level = 0.5
         in_good_zone = True  # range nul -> on laisse passer
+    # V10 : expose la position Fibo continue au ML (avant : seulement has_good_zone 0/1)
+    res.fib_level = float(fib_level)
     # V3.5 (2026-05-19) : mauvaise zone P/D n'est plus REJET mais malus -10.
     # Raison : 30-50% des OB tombent en mauvaise zone Fibo, mais certains
     # peuvent quand meme fonctionner (le ML decidera).
@@ -343,12 +358,18 @@ def evaluate_ob(
             res.confluences.append(f"po3_manipulation_{htf_name}")
         else:
             res.po3_ok = False
+        # V10 : expose les valeurs continues PO3 au ML (avant : seulement has_po3_dist 0/1)
+        res.po3_body_pct = float(getattr(po3, "body_pct", 0.5))
+        res.po3_upper_wick = float(getattr(po3, "upper_wick", 0.0))
+        res.po3_lower_wick = float(getattr(po3, "lower_wick", 0.0))
+        res.po3_aligned = int(po3.sense == ob.direction)
 
     # PO3 sur le grand-parent (D1 / H4 / H1 selon chaine)
     if df_htf2 is not None:
         htf2_bar = _get_htf_bar_containing(df_htf2, ob.validation_ts)
         if htf2_bar is not None:
             po3_2 = analyze_po3(htf2_bar)
+            res.po3_htf2_aligned = int(po3_2.sense == ob.direction)
             if po3_2.sense == ob.direction:
                 res.score += 8
                 res.confluences.append(f"po3_{po3_2.phase}_{htf2_name}")

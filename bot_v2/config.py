@@ -445,7 +445,15 @@ _DEFAULT_PARAMS = {
 
 
 def get_param(instrument: str, key: str, default=None):
-    """Recupere un parametre specifique a l'actif, avec fallback default puis _DEFAULT_PARAMS."""
+    """Recupere un parametre specifique a l'actif, avec fallback default puis _DEFAULT_PARAMS.
+
+    V10 : swing_strength_m1 surchargeable via env var SWS_OVERRIDE (test detection
+    plus permissive). Par defaut, comportement live inchange.
+    """
+    if key == "swing_strength_m1":
+        _sws = _os.getenv("SWS_OVERRIDE")
+        if _sws:
+            return int(_sws)
     if instrument in INSTRUMENT_PARAMS and key in INSTRUMENT_PARAMS[instrument]:
         return INSTRUMENT_PARAMS[instrument][key]
     if key in _DEFAULT_PARAMS:

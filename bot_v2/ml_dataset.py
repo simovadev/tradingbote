@@ -71,136 +71,22 @@ def _get_daily_levels(df_d1, validation_ts):
 
 
 def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None, mss_setups=None):
-    """Extrait features ML V3 - cleaned & enrichi.
+    """Extrait features ML pour le dataset de training.
 
-    V3 (2026-05-19) :
-    - Vire 7 features constantes (multi_liq_sweep, kz_none, has_sync_fvg,
-      has_grandparent, has_phase_reversal, is_mss_setup, has_mss_confirmation)
-    - Ajoute features temps : hour_of_day, day_of_week, minutes_into_killzone
-    - Ajoute features volatilite : atr_at_setup, atr_ratio_100
-    - Ajoute features distance : dist_to_pdh_pct, dist_to_pdl_pct, dist_to_d1_open_pct
-    - Ajoute features structure : bars_since_last_swing
-
-    V5 (2026-05-20) : 4 nouvelles features
-    - phase_expansion, phase_reversal, phase_manipulation
-    - vol_ratio_setup (ATR14/ATR100)
-    - has_mss_nearby (MSS a ±10 bougies de la validation OB)
+    REFACTO V10 (2026-05-22) : delegue a ml_filter._features_from_result pour
+    garantir que training et live calculent EXACTEMENT les memes features.
+    Avant : deux copies separees du code -> risque de divergence (cause de bugs).
+    On ajoute juste les 3 champs meta (instrument, ts, direction) par-dessus.
     """
-    setup = r.trade_setup
-    conf = r.confluences or []
-    conf_text = " ".join(conf)
-
+    from bot_v2 import ml_filter
     f = {
-        # Meta
         "instrument": instrument,
         "ts": ob.validation_ts,
         "direction": ob.direction,
-        # Scores Vizion
-        "score": r.score,
-        "quality": r.quality.total_quality_score if r.quality else 0,
-        "ob_strength": r.quality.ob_strength if r.quality else 0,
-        "sweep_strength": r.quality.sweep_strength if r.quality else 0,
-        "retest_count": r.quality.retest_count if r.quality else 0,
-        "is_unicorn": int(r.quality.is_unicorn) if r.quality else 0,
-        # Trade setup
-        "rr": setup.rr if setup else 0,
-        "risk_points": setup.risk_points if setup else 0,
-        "tp_source_htf": int("htf" in (setup.tp_source if setup else "")),
-        "tp_source_capped": int("capped" in (setup.tp_source if setup else "")),
-        # Daily bias
-        "daily_bias_aligned": int(r.daily_bias_ok is True),
-        "daily_bias_neutral": int(r.daily_bias is not None and r.daily_bias.bias == "neutral"),
-        # Killzone (one-hot)
-        "kz_london": int(r.killzone_name == "London"),
-        "kz_ny_am": int(r.killzone_name == "NY_AM"),
-        "kz_ny_pm": int(r.killzone_name == "NY_PM"),
-        "kz_asia": int(r.killzone_name == "Asia"),
-        "kz_ny_lunch": int(r.killzone_name == "NY_Lunch"),
-        # Confluences (les non-constantes seulement)
-        "has_smt": int("smt_" in conf_text),
-        "has_feu_vert": int("feu_vert" in conf_text),
-        "has_breaker_kz": int("breaker_in_KZ" in conf_text),
-        "has_mss_fvg": int("MSS_with_FVG" in conf_text),
-        "has_po3_dist": int("po3_distribution" in conf_text),
-        "has_phase_expansion": int("phase_expansion" in conf_text),
-        "has_open_midnight_respect": int("respecte_OpenMidnightNY" in conf_text),
-        # V3.5 (2026-05-19) : indicateurs des filtres relaches
-        # Permet au ML d'apprendre si l'absence de ces conditions est penalisante
-        "has_FVG_sync": int("OB_FVG_sync" in conf_text),
-        "has_parent_ob": int("parent_ob_" in conf_text and "no_parent_ob_" not in conf_text),
-        "has_grandparent_ob": int("grandparent_ob_" in conf_text and "no_grandparent" not in conf_text),
-        "has_good_zone": int("mauvaise_zone" not in conf_text and "zone=" in conf_text),
-        "has_session_direction": int("session_sans_direction" not in conf_text),
-        # OB structure
-        "ob_group_size": ob.group_size,
-        "bars_sweep_to_validation": ob.validation_index - getattr(ob.sweep, "sweep_index", ob.group_start_index),
-        "bars_group_to_validation": ob.validation_index - ob.group_start_index,
-        "is_bullish": int(ob.direction == "bullish"),
     }
-
-    # ==================== NEW V3 FEATURES ====================
-    ts = ob.validation_ts
-
-    # 1. Features temps
-    f["hour_of_day"] = int(ts.hour)
-    f["day_of_week"] = int(ts.dayofweek)  # 0=lundi, 4=vendredi
-    # minutes_into_killzone (depuis debut de la KZ courante)
-    # On utilise hour:minute simple - les KZ commencent toutes a heure ronde
-    f["minutes_into_killzone"] = int(ts.hour * 60 + ts.minute) % 60 if r.killzone_name else -1
-
-    # 2. Features volatilite (calculees sur df_ltf au moment de validation)
-    if df_ltf is not None and ob.validation_index is not None:
-        atr_setup = _compute_atr(df_ltf, ob.validation_index, period=14)
-        atr_100 = _compute_atr(df_ltf, ob.validation_index, period=100)
-        f["atr_at_setup"] = atr_setup
-        f["atr_ratio_100"] = (atr_setup / atr_100) if atr_100 > 0 else 1.0
-    else:
-        f["atr_at_setup"] = 0.0
-        f["atr_ratio_100"] = 1.0
-
-    # 3. Features distance (PDH/PDL/D1 open)
-    pdh, pdl, d1_open, _ = _get_daily_levels(df_d1, ts)
-    entry_price = setup.entry_price if setup else (ob.ob_low + ob.ob_high) / 2
-    if pdh and entry_price:
-        f["dist_to_pdh_pct"] = abs(entry_price - pdh) / pdh * 100
-    else:
-        f["dist_to_pdh_pct"] = 0.0
-    if pdl and entry_price:
-        f["dist_to_pdl_pct"] = abs(entry_price - pdl) / pdl * 100
-    else:
-        f["dist_to_pdl_pct"] = 0.0
-    if d1_open and entry_price:
-        f["dist_to_d1_open_pct"] = (entry_price - d1_open) / d1_open * 100
-    else:
-        f["dist_to_d1_open_pct"] = 0.0
-
-    # ==================== NEW V5 FEATURES (2026-05-20) ====================
-    # Phase de marche (feature ML pour que le ML apprenne)
-    # Note : phase_expansion existe deja en V3 (line 118), on garde mais aussi
-    # phase_reversal et phase_manipulation (transformes en bonus/malus en V5).
-    f["phase_reversal"] = int("phase_reversal" in conf_text)
-    f["phase_manipulation"] = int("phase_manipulation" in conf_text)
-
-    # Volatilite ratio courte/longue (a la validation OB)
-    if df_ltf is not None and ob.validation_index >= 100:
-        h14 = df_ltf.iloc[ob.validation_index-14:ob.validation_index]["high"]
-        l14 = df_ltf.iloc[ob.validation_index-14:ob.validation_index]["low"]
-        h100 = df_ltf.iloc[ob.validation_index-100:ob.validation_index]["high"]
-        l100 = df_ltf.iloc[ob.validation_index-100:ob.validation_index]["low"]
-        a14 = float((h14 - l14).mean())
-        a100 = float((h100 - l100).mean())
-        f["vol_ratio_setup"] = (a14 / a100) if a100 > 0 else 1.0
-    else:
-        f["vol_ratio_setup"] = 1.0
-
-    # Presence MSS proche (remplace le filtre dur confirm_ob_with_mss)
-    # FIX V9 (2026-05-22) : leak corrige - on ne regarde plus le futur (abs).
-    _mss_list = mss_setups or []
-    f["has_mss_nearby"] = int(any(
-        0 <= ob.validation_index - getattr(mss, "mss", mss).break_index <= 10
-        for mss in _mss_list
+    f.update(ml_filter._features_from_result(
+        r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups,
     ))
-
     return f
 
 
