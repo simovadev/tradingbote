@@ -66,11 +66,38 @@ def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask):
     placed = pd.Timestamp(rec.placed_ts).value
     expire = placed + EXPIRE_PENDING_MIN * 60 * 1_000_000_000
     n = len(tick_times)
-    fill_idx = None
+
+    # --- Reproduit la VRAIE logique d'un ordre LIMIT MT5 ---
+    # SELL LIMIT : doit etre place AU-DESSUS du prix courant, se remplit quand
+    #   le prix REMONTE toucher entry. Si au placement le prix est deja >= entry
+    #   -> MT5 rejette "Invalid price" (le pending n'aurait pas existe).
+    # BUY LIMIT : doit etre place EN DESSOUS, se remplit quand le prix DESCEND.
+    # On trouve le 1er tick apres placement = prix de reference.
+    ref_idx = None
     for i in range(n):
+        if tick_times[i] > placed:
+            ref_idx = i
+            break
+    if ref_idx is None:
+        rec.outcome = "NO_FILL"; return
+
+    # Prix de reference au placement
+    if rec.direction == "bullish":
+        ref_price = tick_ask[ref_idx]   # on achetera au ask
+        # BUY LIMIT valide seulement si prix de ref AU-DESSUS de l'entry
+        # (sinon le prix est deja en dessous -> fill instantane = ordre invalide)
+        if ref_price <= rec.entry:
+            rec.outcome = "INVALID_PRICE"; return
+    else:
+        ref_price = tick_bid[ref_idx]   # on vendra au bid
+        # SELL LIMIT valide seulement si prix de ref EN DESSOUS de l'entry
+        if ref_price >= rec.entry:
+            rec.outcome = "INVALID_PRICE"; return
+
+    # Cherche le fill : le prix doit REVENIR toucher entry (vrai retracement)
+    fill_idx = None
+    for i in range(ref_idx, n):
         t = tick_times[i]
-        if t <= placed:
-            continue
         if t > expire:
             rec.outcome = "NO_FILL"; return
         if rec.direction == "bullish":
@@ -292,6 +319,7 @@ def main():
     print(f"  WR            : {wr:.1f}%")
     print(f"  PnL (R)       : {tot_pnl:+.1f}")
     print(f"  NO_FILL       : {sum(1 for t in all_tr if t['outcome']=='NO_FILL')}")
+    print(f"  INVALID_PRICE : {sum(1 for t in all_tr if t['outcome']=='INVALID_PRICE')} (prix deja du mauvais cote = ordre rejete MT5)")
     print(f"  OPEN          : {sum(1 for t in all_tr if t['outcome']=='OPEN')}")
     print(f"\n  Par actif :")
     by_a = {}
