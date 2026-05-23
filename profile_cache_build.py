@@ -31,7 +31,7 @@ LIVE_ASSETS = [
 ]
 
 DATA_DIR = "c:/Users/Shadow/TradingBot/data_vantage"
-N_BARS_M1 = 88000
+N_BARS_M1 = 8000  # V13 : reduit de 88000 a 8000 (cf live_runner_v2)
 N_BARS_M15 = 11000
 N_BARS_H1 = 2800
 
