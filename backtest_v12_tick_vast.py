@@ -127,11 +127,73 @@ def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask):
     rec.outcome = "OPEN"
 
 
+def simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask):
+    """Entree MARKET : on entre AU PRIX MARCHE des le placement (pas de retracement).
+    SL/TP gardent leurs niveaux absolus (= ceux de l'OB). Le PnL en R est
+    recalcule depuis le VRAI prix d'entree marche (RR effectif different du RR
+    theorique car l'entree n'est pas pile sur l'OB).
+    """
+    placed = pd.Timestamp(rec.placed_ts).value
+    n = len(tick_times)
+    ref_idx = None
+    for i in range(n):
+        if tick_times[i] > placed:
+            ref_idx = i; break
+    if ref_idx is None:
+        rec.outcome = "NO_FILL"; return
+
+    # Entree au marche : bullish -> ask, bearish -> bid
+    if rec.direction == "bullish":
+        entry_mkt = tick_ask[ref_idx]
+    else:
+        entry_mkt = tick_bid[ref_idx]
+    rec.fill_ts = str(pd.Timestamp(tick_times[ref_idx], tz="UTC"))
+    rec.entry = entry_mkt  # on note le vrai prix d'entree
+
+    # Risk reel = distance entree marche -> SL. Reward = distance -> TP.
+    risk = abs(entry_mkt - rec.sl)
+    if risk <= 0:
+        rec.outcome = "INVALID_PRICE"; return
+    reward = abs(rec.tp - entry_mkt)
+    rec.rr = reward / risk  # RR effectif
+
+    # Si l'entree marche est DEJA au-dela du SL ou du TP -> trade degenere
+    if rec.direction == "bullish":
+        if entry_mkt >= rec.tp:
+            rec.outcome = "INVALID_PRICE"; return  # deja au TP, rien a gagner
+        if entry_mkt <= rec.sl:
+            rec.outcome = "INVALID_PRICE"; return  # deja au SL
+    else:
+        if entry_mkt <= rec.tp:
+            rec.outcome = "INVALID_PRICE"; return
+        if entry_mkt >= rec.sl:
+            rec.outcome = "INVALID_PRICE"; return
+
+    # Suit les ticks pour SL/TP
+    for i in range(ref_idx + 1, n):
+        if rec.direction == "bullish":
+            if tick_bid[i] <= rec.sl:
+                rec.outcome = "LOSS"; rec.pnl_r = -1.0
+                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
+            if tick_bid[i] >= rec.tp:
+                rec.outcome = "WIN"; rec.pnl_r = rec.rr
+                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
+        else:
+            if tick_ask[i] >= rec.sl:
+                rec.outcome = "LOSS"; rec.pnl_r = -1.0
+                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
+            if tick_ask[i] <= rec.tp:
+                rec.outcome = "WIN"; rec.pnl_r = rec.rr
+                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
+    rec.outcome = "OPEN"
+
+
 def backtest_asset(args_tuple):
-    # args : (asset, date_str, step, scan_start_str, scan_end_str)
+    # args : (asset, date_str, step, scan_start_str, scan_end_str, entry_mode)
     # scan_start/end = fenetre de DETECTION (pour paralleliser). Les ticks
     # couvrent toute la journee donc les trades ne sont jamais coupes.
-    asset, date_str, step, scan_start_str, scan_end_str = args_tuple
+    # entry_mode : "limit" (defaut, retracement) ou "market" (entree immediate)
+    asset, date_str, step, scan_start_str, scan_end_str, entry_mode = args_tuple
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -222,7 +284,10 @@ def backtest_asset(args_tuple):
             cur += _pd.Timedelta(minutes=step)
 
         for rec in active:
-            simulate_on_ticks(rec, tick_times, tick_bid, tick_ask)
+            if entry_mode == "market":
+                simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask)
+            else:
+                simulate_on_ticks(rec, tick_times, tick_bid, tick_ask)
 
         closed = [t for t in active if t.outcome in ("WIN", "LOSS")]
         wr = (sum(1 for t in closed if t.outcome == "WIN") / len(closed) * 100) if closed else 0
@@ -249,6 +314,8 @@ def main():
     p.add_argument("--workers", type=int, default=128)
     p.add_argument("--scan_hours", type=int, default=2,
                    help="Decoupe la detection en fenetres de X heures (parallelisme)")
+    p.add_argument("--entry_mode", default="limit", choices=["limit", "market"],
+                   help="limit (retracement) ou market (entree immediate a la validation)")
     args = p.parse_args()
 
     day = pd.Timestamp(args.date, tz="UTC")
@@ -267,12 +334,13 @@ def main():
     print(f"Fenetres scan : {len(windows)} x {args.scan_hours}h", flush=True)
     print(f"Tasks         : {len(args.assets) * len(windows)}", flush=True)
     print(f"Workers       : {args.workers}", flush=True)
+    print(f"Entry mode    : {args.entry_mode.upper()}", flush=True)
     print()
 
     tasks = []
     for a in args.assets:
         for (ws, we) in windows:
-            tasks.append((a, args.date, args.step, ws, we))
+            tasks.append((a, args.date, args.step, ws, we, args.entry_mode))
     results = []
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
