@@ -185,12 +185,20 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask,
             actual_entry = tick_ask[ref_idx]
         else:
             actual_entry = tick_bid[ref_idx]
-        # On garde le SL/TP absolus de l'OB. Le R est recalcule depuis actual_entry.
+        # FIX #4b : recalcul TP pour preserver le RR du setup OB.
+        # Sinon, en MARKET, le prix est deja engage vers le TP -> RR effectif tres faible
+        # (median observe = 0.67 au lieu de 1.5) -> WIN ne paye pas les LOSS.
+        # On garde le RR theorique du setup en deplacant le TP depuis actual_entry.
         risk_from_actual = abs(actual_entry - sl_orig)
-        reward_from_actual = abs(tp - actual_entry)
-        rr_effective = reward_from_actual / risk_from_actual if risk_from_actual > 0 else 0
+        rr_target = rec.get("rr", 1.5)  # RR theorique du setup (= du OB)
+        if direction == "bullish":
+            tp = actual_entry + risk_from_actual * rr_target
+        else:
+            tp = actual_entry - risk_from_actual * rr_target
+        rr_effective = rr_target  # par construction
         rec['actual_entry'] = actual_entry
         rec['rr_effective'] = rr_effective
+        rec['tp'] = tp  # le TP utilise pour la simulation est le nouveau
     else:
         # === Mode LIMIT (original) ===
         # Check prix valide
@@ -225,6 +233,7 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask,
     if risk == 0:
         rec['outcome'] = "INVALID_PRICE"
         return
+    # tp peut avoir ete recalcule en mode MARKET (FIX #4b)
     reward = abs(tp - actual_entry)
     rec['risk_abs'] = risk
     rec['reward_abs'] = reward
@@ -297,6 +306,65 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask,
         rec['pnl_r'] = 0.0 - commission_r  # BE = 0R (juste la commission)
 
 
+def precompute_shared_cache(assets, start_date, end_date, output_dir):
+    """Pre-calcule le cache complet pour chaque actif UNE SEULE FOIS.
+
+    Les workers liront ensuite ce pickle au lieu de recalculer.
+    Gain : N_actifs caches calcules au lieu de N_actifs * N_dates.
+
+    Args:
+        assets : liste des actifs
+        start_date, end_date : dates limites (UTC)
+        output_dir : dossier ou ecrire les pickles cache_<asset>.pkl
+    """
+    import pickle as _pickle
+    from pathlib import Path
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    sys.path.insert(0, ROOT)
+    from bot_v2.data_loader import load
+    from bot_v2.concepts.order_block import detect_order_blocks as _dob
+    from bot_v2.concepts.liquidity import find_swings as _fs
+    from bot_v2.concepts.fvg import detect_fvg as _dfvg
+    from bot_v2.concepts.breaker import detect_breakers as _dbrk
+    from bot_v2.concepts.structure import detect_structure_breaks as _dsb
+    from bot_v2.config import get_param as _gp
+
+    start = pd.Timestamp(start_date, tz="UTC")
+    end = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(hours=24)
+    ws = start - pd.Timedelta(days=60)
+
+    print(f"=== PRE-CALCUL CACHES PARTAGES ({len(assets)} actifs) ===", flush=True)
+    t0 = time.time()
+    for i, asset in enumerate(assets, 1):
+        ta = time.time()
+        try:
+            df_m1 = load(asset, "M1", start=ws, end=end + pd.Timedelta(days=1))
+            df_m15 = load(asset, "M15", start=ws, end=end + pd.Timedelta(days=1))
+            df_h1 = load(asset, "H1", start=ws - pd.Timedelta(days=30), end=end + pd.Timedelta(days=1))
+            sws = _gp(asset, "swing_strength_m1", 2)
+            cache = {
+                "obs": _dob(df_m1, swing_strength=sws),
+                "swings_ltf": _fs(df_m1, strength=sws),
+                "fvgs_ltf": _dfvg(df_m1),
+                "breakers_ltf": _dbrk(df_m1),
+                "obs_htf": _dob(df_m15),
+                "obs_htf2": _dob(df_h1),
+                "htf_trend": None,
+            }
+            cache["structure_breaks"] = _dsb(
+                df_m1, swings=cache["swings_ltf"], fvgs=cache["fvgs_ltf"]
+            )
+            out = f"{output_dir}/cache_{asset}.pkl"
+            with open(out, "wb") as f:
+                _pickle.dump(cache, f, protocol=_pickle.HIGHEST_PROTOCOL)
+            dt = time.time() - ta
+            print(f"  [{i:2d}/{len(assets)}] {asset:8s} OK {dt:.1f}s  obs={len(cache['obs'])} fvg={len(cache['fvgs_ltf'])} brk={len(cache['breakers_ltf'])}", flush=True)
+        except Exception as e:
+            print(f"  [{i:2d}/{len(assets)}] {asset:8s} FAIL : {e}", flush=True)
+    print(f"=== Pre-calcul fini en {time.time()-t0:.1f}s ===\n", flush=True)
+
+
 def compute_atr_m5(df_m1, cut_ts, n=20):
     """Calcule l'ATR M5 sur les N dernieres bougies M5 avant cut_ts.
     On reagrege M1 -> M5 pour avoir un proxy ATR.
@@ -325,6 +393,10 @@ def backtest_one(args_tuple):
     apply_breakeven_at_R = opts.get("apply_breakeven_at_R", None)
     latency_s = opts.get("latency_s", 0.0)
     commission_r = opts.get("commission_r", 0.0)
+    step_min = opts.get("step_min", 5)
+    # Cache partage : si fourni, on lit le pickle au lieu de recalculer
+    shared_cache_path = opts.get("shared_cache_path", None)
+    cache_end_date = opts.get("cache_end_date", None)  # date max couverte par le cache
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -358,16 +430,21 @@ def backtest_one(args_tuple):
         start = day
         end = day + pd.Timedelta(hours=24)
 
+        # Si cache partage : chargement bougies couvre TOUTES les dates (pas juste cette task)
+        if shared_cache_path is not None and cache_end_date is not None:
+            end_for_load = pd.Timestamp(cache_end_date, tz="UTC") + pd.Timedelta(hours=24)
+        else:
+            end_for_load = end
         ws = start - pd.Timedelta(days=60)
-        df_m1 = load(asset, "M1", start=ws, end=end + pd.Timedelta(days=1))
-        df_m15 = load(asset, "M15", start=ws, end=end + pd.Timedelta(days=1))
-        df_h1 = load(asset, "H1", start=ws - pd.Timedelta(days=30), end=end + pd.Timedelta(days=1))
+        df_m1 = load(asset, "M1", start=ws, end=end_for_load + pd.Timedelta(days=1))
+        df_m15 = load(asset, "M15", start=ws, end=end_for_load + pd.Timedelta(days=1))
+        df_h1 = load(asset, "H1", start=ws - pd.Timedelta(days=30), end=end_for_load + pd.Timedelta(days=1))
         try:
-            df_h4 = load(asset, "H4", start=ws - pd.Timedelta(days=120), end=end + pd.Timedelta(days=1))
+            df_h4 = load(asset, "H4", start=ws - pd.Timedelta(days=120), end=end_for_load + pd.Timedelta(days=1))
         except Exception:
             df_h4 = None
         try:
-            df_d1 = load(asset, "D1", start=ws - pd.Timedelta(days=400), end=end + pd.Timedelta(days=1))
+            df_d1 = load(asset, "D1", start=ws - pd.Timedelta(days=400), end=end_for_load + pd.Timedelta(days=1))
         except Exception:
             df_d1 = build_d1_from_h1(df_h1)
 
@@ -385,26 +462,37 @@ def backtest_one(args_tuple):
             return {"ok": False, "asset": asset, "date": date_str,
                     "error": "no model", "rows": []}
 
-        # === Pre-calcul cache complet (gain vitesse) ===
+        # === Cache complet : lecture partagee OU recalcul ===
         sws = _gp(asset, "swing_strength_m1", 2)
-        cache_full = {
-            "obs": _dob(df_m1, swing_strength=sws),
-            "swings_ltf": _fs(df_m1, strength=sws),
-            "fvgs_ltf": _dfvg(df_m1),
-            "breakers_ltf": _dbrk(df_m1),
-            "obs_htf": _dob(df_m15),
-            "obs_htf2": _dob(df_h1),
-            "htf_trend": None,
-        }
-        cache_full["structure_breaks"] = _dsb(
-            df_m1, swings=cache_full["swings_ltf"], fvgs=cache_full["fvgs_ltf"]
-        )
+        if shared_cache_path is not None:
+            # Lecture depuis pickle partage (1 calcul pour 14 actifs * N dates)
+            import pickle as _pickle
+            cache_pkl = f"{shared_cache_path}/cache_{asset}.pkl"
+            if not os.path.exists(cache_pkl):
+                return {"ok": False, "asset": asset, "date": date_str,
+                        "error": f"cache pickle manquant: {cache_pkl}", "rows": []}
+            with open(cache_pkl, "rb") as f:
+                cache_full = _pickle.load(f)
+        else:
+            # Fallback : calcul direct dans le worker (comportement actuel)
+            cache_full = {
+                "obs": _dob(df_m1, swing_strength=sws),
+                "swings_ltf": _fs(df_m1, strength=sws),
+                "fvgs_ltf": _dfvg(df_m1),
+                "breakers_ltf": _dbrk(df_m1),
+                "obs_htf": _dob(df_m15),
+                "obs_htf2": _dob(df_h1),
+                "htf_trend": None,
+            }
+            cache_full["structure_breaks"] = _dsb(
+                df_m1, swings=cache_full["swings_ltf"], fvgs=cache_full["fvgs_ltf"]
+            )
 
         # === Boucle de scan (5 min step) ===
         all_rows = []
         evaluated = set()
         cur = start
-        step = pd.Timedelta(minutes=5)
+        step = pd.Timedelta(minutes=step_min)
         while cur <= end:
             cut = cur - pd.Timedelta(minutes=1)
             ie = df_m1.index.searchsorted(cut, side="right")
@@ -571,6 +659,12 @@ def main():
                    help="Latence simulee en s entre placement et execution")
     p.add_argument("--commission_r", type=float, default=0.0,
                    help="Commission par trade en R (ex: 0.07 = 7% du risque)")
+    p.add_argument("--step_min", type=int, default=5,
+                   help="Pas de scan en minutes (default 5, mais 1 reproduit le live sync close M1)")
+    p.add_argument("--shared_cache", action="store_true",
+                   help="Pre-calcule le cache UNE FOIS par actif (gain ~3-5x). Workers lisent pickle.")
+    p.add_argument("--shared_cache_dir", default="/tmp/bt_shared_cache",
+                   help="Dossier ou ecrire les caches partages (default /tmp/bt_shared_cache)")
     args = p.parse_args()
 
     dates = []
@@ -589,7 +683,14 @@ def main():
         "apply_breakeven_at_R": args.breakeven_at_R,
         "latency_s": args.latency_s,
         "commission_r": args.commission_r,
+        "step_min": args.step_min,
     }
+
+    # === Cache partage : pre-calcul UNE FOIS par actif ===
+    if args.shared_cache:
+        precompute_shared_cache(args.assets, args.start, args.end, args.shared_cache_dir)
+        opts["shared_cache_path"] = args.shared_cache_dir
+        opts["cache_end_date"] = args.end
 
     print(f"=== BACKTEST DIAGNOSTIC ULTRA-LOGGE ===")
     print(f"Periode    : {args.start} -> {args.end} ({len(dates)} jours ouvres)")
@@ -601,6 +702,8 @@ def main():
     print(f"  sl_min_atr      : {args.sl_min_atr} (factor={args.sl_min_atr_factor})  (FIX #1)")
     print(f"  breakeven_at_R  : {args.breakeven_at_R}  (FIX #2)")
     print(f"  block_hours     : {args.block_hours}  (FIX #3)")
+    print(f"  step_min        : {args.step_min}min  (FIX #5)")
+    print(f"  shared_cache    : {args.shared_cache}  (perf)")
     print(f"  latency_s       : {args.latency_s}")
     print(f"  commission_r    : {args.commission_r}")
     print()
