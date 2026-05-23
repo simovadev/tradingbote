@@ -118,13 +118,36 @@ def build_cache_for_asset(asset: str, mt5_exec: MT5Executor) -> dict | None:
     }
 
 
-def write_cache_atomic(asset: str, data: dict) -> None:
-    """Ecriture atomique : ecrit dans un fichier tmp puis rename."""
+def write_cache_atomic(asset: str, data: dict, retries: int = 40, delay_s: float = 0.025) -> None:
+    """Ecriture atomique : ecrit dans un fichier tmp puis rename.
+
+    Sur Windows, os.replace(tmp, final) leve WinError 32/5 si `final` est ouvert
+    en lecture par le bot a cet instant precis (Windows verrouille le fichier
+    ouvert, contrairement a POSIX). La lecture du bot ne dure que quelques ms et
+    n'a lieu qu'une fois/minute, donc on retry le rename avec backoff jusqu'a ce
+    que la fenetre de lecture se libere. Plafond : ~retries*delay_s = ~1s, large
+    devant la duree d'une lecture bot. Sur Linux ce retry n'est jamais utilise.
+    """
     final = CACHE_DIR / f"{asset}.pkl"
-    tmp = CACHE_DIR / f"{asset}.pkl.tmp"
+    # tmp unique par PID pour eviter qu'un autre process ecrase notre tmp
+    tmp = CACHE_DIR / f"{asset}.pkl.{os.getpid()}.tmp"
     with open(tmp, "wb") as f:
         pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-    os.replace(tmp, final)
+
+    last_err: OSError | None = None
+    for attempt in range(retries):
+        try:
+            os.replace(tmp, final)
+            return
+        except OSError as e:  # WinError 32/5 : fichier en cours de lecture
+            last_err = e
+            time.sleep(delay_s)
+    # Echec apres tous les retries : nettoyer le tmp et propager
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    raise last_err
 
 
 def main():
@@ -182,7 +205,11 @@ def main():
             if args.sleep_align:
                 now = datetime.now(timezone.utc)
                 next_min = now.replace(second=0, microsecond=0) + pd.Timedelta(minutes=1)
-                target = next_min + pd.Timedelta(seconds=2)
+                # Cible xx:00:03 : assez tard pour que MT5 ait propage la bougie
+                # close a xx:00, assez tot pour que le calcul (~2.5s) + ecriture
+                # finisse avant que le live runner ne LISE le cache a xx:00:06.
+                # Garantit que daemon et bot voient la MEME bougie -> cache hit.
+                target = next_min + pd.Timedelta(seconds=3)
                 sleep_s = (target - now).total_seconds()
                 if sleep_s > 0:
                     log.info(f"sleep {sleep_s:.1f}s (target = {target.strftime('%H:%M:%S')})")

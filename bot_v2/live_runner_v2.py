@@ -191,7 +191,14 @@ def get_risk_pct(balance: float) -> float:
 
 
 def get_active_assets(balance: float) -> list[str]:
-    """Mode test (balance < 50€) : actifs avec lot min petit uniquement."""
+    """Mode test (balance < 50€) : actifs avec lot min petit uniquement.
+
+    Override : LIVE_ASSETS_OVERRIDE="BTCUSD,EURUSD" force la liste (ex: test
+    weekend BTCUSD seul, ou debug 1 actif). Ignore le mode test si defini.
+    """
+    _override = os.environ.get("LIVE_ASSETS_OVERRIDE", "").strip()
+    if _override:
+        return [a.strip() for a in _override.split(",") if a.strip()]
     if balance < TEST_MODE_THRESHOLD:
         return TEST_MODE_ASSETS
     return LIVE_ASSETS
@@ -340,8 +347,13 @@ def try_load_cache_from_daemon(instrument: str, df_m1_last_ts) -> dict | None:
     if not path.exists():
         return None
     try:
+        # Lire tous les octets puis fermer AVANT de desserialiser : sur Windows
+        # le verrou de lecture ne dure ainsi que la lecture brute (~ms) au lieu
+        # de toute la duree du pickle.load (~0.4s), ce qui reduit fortement la
+        # fenetre de conflit avec le os.replace du daemon (WinError 32/5).
         with open(path, "rb") as f:
-            data = _pickle.load(f)
+            raw = f.read()
+        data = _pickle.loads(raw)
     except Exception:
         return None
 
@@ -532,6 +544,7 @@ def compute_asset(payload: dict) -> dict:
             cache["obs_htf2"] = detect_order_blocks(df_h1)
             cache_source = "compute"
         cache_build_s = _time.time() - _t
+        diag_log.append(f"CACHE {instrument}: source={cache_source} build={cache_build_s*1000:.0f}ms")
 
         mss_setups = detect_mss_setups(
             df_m1, structure_breaks=cache["structure_breaks"], swings=cache["swings_ltf"],
@@ -2324,12 +2337,15 @@ def run_live(test_dry_run: bool = False):
 
             # V12 (2026-05-23) : scan synchronise sur la close des bougies M1.
             # Au lieu de sleep(5s) en boucle ouverte (3-4 scans sur la meme bougie),
-            # on dort jusqu'a 3s APRES la prochaine minute. Garantit 1 scan par
+            # on dort jusqu'a 6s APRES la prochaine minute. Garantit 1 scan par
             # bougie fermee, exactement comme le backtest. Aligne 100% live/backtest.
+            # 6s (et non 3s) : laisse le cache_daemon (qui ecrit a ~xx:00:05.5)
+            # finir AVANT que le bot ne lise le cache -> cache hit ~100%. Sur le
+            # placement d'ordre l'impact est nul (latence MT5 ~1s, ordre a ~xx:00:07).
             now_utc = datetime.now(timezone.utc)
             next_min = (now_utc.replace(second=0, microsecond=0)
                         + pd.Timedelta(minutes=1)
-                        + pd.Timedelta(seconds=3))
+                        + pd.Timedelta(seconds=6))
             sleep_sec = (next_min - now_utc).total_seconds()
             if sleep_sec > 0:
                 time.sleep(sleep_sec)

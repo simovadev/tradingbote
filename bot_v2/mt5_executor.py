@@ -135,22 +135,36 @@ class MT5Executor:
         )
 
         # Detection broker time offset (Vantage = +3h en ete)
-        # On utilise le dernier tick EURUSD (toujours dispo) pour comparer
-        # tick.time (epoch broker treated as UTC) vs vrai UTC now.
+        # On compare tick.time (epoch broker treated as UTC) vs vrai UTC now.
+        # FIX 2026-05-23 : le forex (EURUSD) est GELE le week-end -> son dernier
+        # tick date de vendredi 23:56, ce qui faussait l'offset a -19h au lieu de
+        # +3h, et gelait tout le buffer (gap_min negatif). On prend donc le tick
+        # LE PLUS RECENT parmi plusieurs symboles, dont des cryptos 24/7 (BTCUSD)
+        # qui restent frais le week-end -> offset toujours correct.
         try:
-            tick = mt5.symbol_info_tick("EURUSD+") or mt5.symbol_info_tick("EURUSD")
-            if tick and tick.time > 0:
-                utc_now_real = datetime.now(timezone.utc).timestamp()
-                offset = tick.time - utc_now_real
+            utc_now_real = datetime.now(timezone.utc).timestamp()
+            candidates = ["BTCUSD", "ETHUSD", "EURUSD+", "EURUSD", "XAUUSD+"]
+            freshest_tick_time = 0.0
+            freshest_sym = None
+            for sym in candidates:
+                try:
+                    tick = mt5.symbol_info_tick(to_broker_symbol(sym)) or mt5.symbol_info_tick(sym)
+                except Exception:
+                    tick = None
+                if tick and tick.time > freshest_tick_time:
+                    freshest_tick_time = tick.time
+                    freshest_sym = sym
+            if freshest_tick_time > 0:
+                offset = freshest_tick_time - utc_now_real
                 # Arrondi a l'heure entiere la plus proche (broker time est tjs +Nh)
                 offset_hours = round(offset / 3600)
                 self.broker_utc_offset_sec = offset_hours * 3600
                 log.info(
                     f"Broker UTC offset detecte : {offset_hours:+d}h "
-                    f"(tick raw offset = {offset:+.0f}s) -> compense en interne"
+                    f"(via {freshest_sym}, tick raw offset = {offset:+.0f}s) -> compense en interne"
                 )
             else:
-                log.warning("Impossible de detecter broker offset (pas de tick EURUSD)")
+                log.warning("Impossible de detecter broker offset (aucun tick dispo)")
         except Exception as e:
             log.warning(f"Detection broker offset failed : {e}")
 
