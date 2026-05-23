@@ -177,18 +177,12 @@ def evaluate_ob(
     res.killzone_name = kz
     is_forex = get_param(instrument, "is_forex", False)
 
-    # Forex : blocage horaire NY 21h-02h (volatilite morte).
-    # USDJPY exclu : la paire JPY est active en Asia.
-    # V12 test (2026-05-23) : filtre DESACTIVE pour voir si forex/or trade enfin.
-    # Si oui -> filtre etait trop strict, on l'ajuste. Si non -> ML severe.
-    # if is_forex and instrument != "USDJPY":
-    #     from bot_v2.concepts.killzones import to_ny_time
-    #     ny_ts = to_ny_time(ob.validation_ts)
-    #     ny_hour = ny_ts.hour
-    #     if ny_hour >= 21 or ny_hour < 2:
-    #         res.killzone_ok = False
-    #         res.rejection_reason = f"Forex bloque overnight US ({ny_hour}h NY)"
-    #         return res
+    # FILTRE OVERNIGHT FOREX SUPPRIME (user 2026-05-23).
+    # Avant : blocage forex 21h-02h NY (sauf USDJPY). Ce filtre cassait le
+    # trading forex/or et n'apportait rien : le ML V12 donne deja des probas
+    # basses (0.2-0.5) en session morte et hautes (0.70-0.85) en London/NY.
+    # Le ML filtre naturellement les heures creuses -> pas besoin d'un filtre
+    # horaire dur. Diagnostic : sans ce filtre, EURUSD 0.835 / USDCAD 0.848 en NY.
 
     if kz is None:
         res.killzone_ok = False
