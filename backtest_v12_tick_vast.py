@@ -250,6 +250,70 @@ def simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask,
     rec.outcome = "OPEN"
 
 
+def simulate_market_on_candles(rec, df_m1, commission_r=0.0):
+    """Entree MARKET simulee sur les BOUGIES M1 (coherent avec le ML/OB).
+
+    Tout est sur la meme source (data_vantage) :
+    - Entry = close de la bougie de placement (= bougie ou l'OB est valide + scan)
+    - SL/TP verifies bougie par bougie sur df_m1
+    - Ordre pessimiste si SL et TP touches dans la meme bougie -> SL d'abord
+
+    Elimine le decalage tick/bougie qui cassait les RR.
+    """
+    placed_ts = pd.Timestamp(rec.placed_ts)
+    # La bougie de placement = celle dont l'open <= placed_ts < open+1min
+    # On entre a la CLOSE de cette bougie (= comportement realiste : on decide
+    # a la close M1, on entre au prix de close).
+    # Index de la bougie qui contient placed_ts
+    cut = placed_ts.floor("1min")
+    ie = df_m1.index.searchsorted(cut, side="right")
+    if ie >= len(df_m1) or ie < 1:
+        rec.outcome = "NO_FILL"; return
+    # Entry = close de la bougie a l'index ie-1 (la bougie de validation/scan)
+    entry_candle = df_m1.iloc[ie - 1]
+    entry_px = float(entry_candle["close"])
+    rec.entry = entry_px
+    rec.fill_ts = str(df_m1.index[ie - 1])
+
+    # Risk/reward depuis le vrai entry
+    risk = abs(entry_px - rec.sl)
+    if risk <= 0:
+        rec.outcome = "INVALID_PRICE"; return
+    reward = abs(rec.tp - entry_px)
+    rec.rr = reward / risk
+
+    # Trade degenere : entry deja au-dela du SL ou TP
+    if rec.direction == "bullish":
+        if entry_px >= rec.tp or entry_px <= rec.sl:
+            rec.outcome = "INVALID_PRICE"; return
+    else:
+        if entry_px <= rec.tp or entry_px >= rec.sl:
+            rec.outcome = "INVALID_PRICE"; return
+
+    # Suit les bougies M1 suivantes pour SL/TP
+    expire_bars = EXPIRE_PENDING_MIN  # max bougies a tenir (=60 par defaut)
+    for j in range(ie, min(ie + 1440, len(df_m1))):  # max 1 jour de bougies
+        bar = df_m1.iloc[j]
+        hi = float(bar["high"]); lo = float(bar["low"])
+        if rec.direction == "bullish":
+            hit_sl = lo <= rec.sl
+            hit_tp = hi >= rec.tp
+        else:
+            hit_sl = hi >= rec.sl
+            hit_tp = lo <= rec.tp
+        if hit_sl and hit_tp:
+            # Ambigu : ordre pessimiste -> SL d'abord
+            rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
+            rec.exit_ts = str(df_m1.index[j]); return
+        if hit_sl:
+            rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
+            rec.exit_ts = str(df_m1.index[j]); return
+        if hit_tp:
+            rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
+            rec.exit_ts = str(df_m1.index[j]); return
+    rec.outcome = "OPEN"
+
+
 def backtest_asset(args_tuple):
     # args : (asset, date_str, step, scan_start_str, scan_end_str, entry_mode)
     # scan_start/end = fenetre de DETECTION (pour paralleliser). Les ticks
@@ -465,7 +529,10 @@ def backtest_asset(args_tuple):
             cur += _pd.Timedelta(minutes=step)
 
         for rec in active:
-            if entry_mode == "market":
+            if entry_mode == "market_candles":
+                # MARKET sur bougies (coherent ML, pas de decalage tick)
+                simulate_market_on_candles(rec, df_m1, commission_r=commission_r)
+            elif entry_mode == "market":
                 simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask,
                                          latency_s=latency_s, commission_r=commission_r)
             else:
@@ -498,7 +565,7 @@ def main():
     p.add_argument("--workers", type=int, default=128)
     p.add_argument("--scan_hours", type=int, default=2,
                    help="Decoupe la detection en fenetres de X heures (parallelisme)")
-    p.add_argument("--entry_mode", default="limit", choices=["limit", "market"],
+    p.add_argument("--entry_mode", default="limit", choices=["limit", "market", "market_candles"],
                    help="limit (retracement) ou market (entree immediate a la validation)")
     p.add_argument("--latency_s", type=float, default=0.0,
                    help="Latence en s entre decision et execution (realisme VPS/MT5). Default 0.")
