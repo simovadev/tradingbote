@@ -138,14 +138,24 @@ def compute_htf_context(df_h1, df_h4, cur_ts) -> dict:
     return out
 
 
-def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask, commission_r=0.0):
-    """Simulate LIMIT fill + calcule MFE/MAE + premier tick a toucher SL/TP."""
-    placed = pd.Timestamp(rec['placed_ts']).value
+def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask,
+                                  commission_r=0.0,
+                                  entry_mode="limit",
+                                  apply_breakeven_at_R=None,
+                                  latency_s=0.0):
+    """Simulate fill + calcule MFE/MAE + premier tick a toucher SL/TP.
+
+    FIX #4 : entry_mode="market" -> on entre au 1er tick apres placement
+             au lieu d'attendre un retracement (LIMIT)
+    FIX #2 : apply_breakeven_at_R=0.5 -> si MFE >= 0.5R, deplace SL a entry
+             (= breakeven, plus de LOSS sur ce trade)
+    """
+    placed = pd.Timestamp(rec['placed_ts']).value + int(latency_s * 1_000_000_000)
     expire = placed + EXPIRE_PENDING_MIN * 60 * 1_000_000_000
     n = len(tick_times)
     direction = rec['direction']
     entry = rec['entry']
-    sl = rec['sl']
+    sl_orig = rec['sl']
     tp = rec['tp']
 
     # 1. Trouver le 1er tick apres placement (prix de reference)
@@ -162,44 +172,69 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask, commission
         ref_price = tick_ask[ref_idx]
         rec['price_at_placement'] = ref_price
         rec['entry_vs_ref_price_pct'] = (ref_price - entry) / entry * 100
-        if ref_price <= entry:
-            rec['outcome'] = "INVALID_PRICE"
-            return
     else:
         ref_price = tick_bid[ref_idx]
         rec['price_at_placement'] = ref_price
         rec['entry_vs_ref_price_pct'] = (entry - ref_price) / entry * 100
-        if ref_price >= entry:
+
+    # === FIX #4 : Mode MARKET — on entre tout de suite au prix marche ===
+    if entry_mode == "market":
+        fill_idx = ref_idx
+        # Le prix d'entree devient le prix marche (pas l'entry calcule par OB)
+        if direction == "bullish":
+            actual_entry = tick_ask[ref_idx]
+        else:
+            actual_entry = tick_bid[ref_idx]
+        # On garde le SL/TP absolus de l'OB. Le R est recalcule depuis actual_entry.
+        risk_from_actual = abs(actual_entry - sl_orig)
+        reward_from_actual = abs(tp - actual_entry)
+        rr_effective = reward_from_actual / risk_from_actual if risk_from_actual > 0 else 0
+        rec['actual_entry'] = actual_entry
+        rec['rr_effective'] = rr_effective
+    else:
+        # === Mode LIMIT (original) ===
+        # Check prix valide
+        if direction == "bullish" and ref_price <= entry:
             rec['outcome'] = "INVALID_PRICE"
             return
-
-    # 2. Chercher le fill
-    fill_idx = None
-    for i in range(ref_idx, n):
-        if tick_times[i] > expire:
-            rec['outcome'] = "NO_FILL"; return
-        if direction == "bullish":
-            if tick_ask[i] <= entry:
-                fill_idx = i; break
-        else:
-            if tick_bid[i] >= entry:
-                fill_idx = i; break
-    if fill_idx is None:
-        rec['outcome'] = "NO_FILL"
-        return
+        if direction == "bearish" and ref_price >= entry:
+            rec['outcome'] = "INVALID_PRICE"
+            return
+        # Chercher le fill (retracement vers entry)
+        fill_idx = None
+        for i in range(ref_idx, n):
+            if tick_times[i] > expire:
+                rec['outcome'] = "NO_FILL"; return
+            if direction == "bullish":
+                if tick_ask[i] <= entry:
+                    fill_idx = i; break
+            else:
+                if tick_bid[i] >= entry:
+                    fill_idx = i; break
+        if fill_idx is None:
+            rec['outcome'] = "NO_FILL"
+            return
+        actual_entry = entry  # LIMIT fill exactement a entry
 
     rec['fill_ts'] = str(pd.Timestamp(tick_times[fill_idx], tz="UTC"))
     rec['time_to_fill_s'] = (tick_times[fill_idx] - placed) / 1e9
-    rec['price_at_fill'] = entry  # (le LIMIT fill exactement a entry)
+    rec['price_at_fill'] = actual_entry
 
-    # 3. Tracking MFE/MAE + outcome
-    risk = abs(entry - sl)
-    reward = abs(tp - entry)
+    # === 3. Tracking MFE/MAE + outcome (avec SL dynamique via BE) ===
+    risk = abs(actual_entry - sl_orig)
+    if risk == 0:
+        rec['outcome'] = "INVALID_PRICE"
+        return
+    reward = abs(tp - actual_entry)
     rec['risk_abs'] = risk
     rec['reward_abs'] = reward
 
-    max_favor = 0.0  # max favorable excursion en abs price
-    max_adverse = 0.0  # max adverse excursion en abs price
+    sl_active = sl_orig  # SL dynamique (peut etre deplace par BE)
+    be_threshold = (apply_breakeven_at_R * risk) if apply_breakeven_at_R else None
+    be_triggered = False
+
+    max_favor = 0.0
+    max_adverse = 0.0
     ticks_before_outcome = 0
     final_outcome_idx = None
     final_outcome = None
@@ -207,26 +242,36 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask, commission
     for i in range(fill_idx + 1, n):
         ticks_before_outcome += 1
         if direction == "bullish":
-            cur_price = tick_bid[i]   # on suit le bid pour pos LONG
-            move_favor = cur_price - entry
-            move_adverse = entry - cur_price
+            cur_price = tick_bid[i]
+            move_favor = cur_price - actual_entry
+            move_adverse = actual_entry - cur_price
         else:
             cur_price = tick_ask[i]
-            move_favor = entry - cur_price
-            move_adverse = cur_price - entry
+            move_favor = actual_entry - cur_price
+            move_adverse = cur_price - actual_entry
         if move_favor > max_favor:
             max_favor = move_favor
         if move_adverse > max_adverse:
             max_adverse = move_adverse
 
-        # check SL/TP
+        # === FIX #2 : Breakeven a +X*R ===
+        if be_threshold and not be_triggered and move_favor >= be_threshold:
+            sl_active = actual_entry  # deplace SL a entry = breakeven
+            be_triggered = True
+
+        # check SL/TP avec sl_active (peut etre BE)
         if direction == "bullish":
-            if tick_bid[i] <= sl:
+            if tick_bid[i] <= sl_active:
+                # Si BE active et touche entry = trade NEUTRE
+                if be_triggered and sl_active == actual_entry:
+                    final_outcome = "BE"; final_outcome_idx = i; break
                 final_outcome = "LOSS"; final_outcome_idx = i; break
             if tick_bid[i] >= tp:
                 final_outcome = "WIN"; final_outcome_idx = i; break
         else:
-            if tick_ask[i] >= sl:
+            if tick_ask[i] >= sl_active:
+                if be_triggered and sl_active == actual_entry:
+                    final_outcome = "BE"; final_outcome_idx = i; break
                 final_outcome = "LOSS"; final_outcome_idx = i; break
             if tick_ask[i] <= tp:
                 final_outcome = "WIN"; final_outcome_idx = i; break
@@ -234,6 +279,7 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask, commission
     rec['mfe_R'] = max_favor / risk if risk > 0 else 0
     rec['mae_R'] = max_adverse / risk if risk > 0 else 0
     rec['ticks_count_in_trade'] = ticks_before_outcome
+    rec['be_triggered'] = be_triggered
 
     if final_outcome is None:
         rec['outcome'] = "OPEN"
@@ -243,13 +289,42 @@ def simulate_limit_with_tracking(rec, tick_times, tick_bid, tick_ask, commission
     rec['exit_ts'] = str(pd.Timestamp(tick_times[final_outcome_idx], tz="UTC"))
     rec['hold_time_s'] = (tick_times[final_outcome_idx] - tick_times[fill_idx]) / 1e9
     if final_outcome == "WIN":
-        rec['pnl_r'] = rec['rr'] - commission_r
-    else:
+        # En mode MARKET, on utilise le RR effectif (depuis actual_entry), pas rr theorique
+        rec['pnl_r'] = rec.get('rr_effective', rec['rr']) - commission_r
+    elif final_outcome == "LOSS":
         rec['pnl_r'] = -1.0 - commission_r
+    elif final_outcome == "BE":
+        rec['pnl_r'] = 0.0 - commission_r  # BE = 0R (juste la commission)
+
+
+def compute_atr_m5(df_m1, cut_ts, n=20):
+    """Calcule l'ATR M5 sur les N dernieres bougies M5 avant cut_ts.
+    On reagrege M1 -> M5 pour avoir un proxy ATR.
+    """
+    sub = df_m1[df_m1.index <= cut_ts].tail(n * 5)
+    if len(sub) < 10:
+        return None
+    # Resample to M5
+    m5 = sub.resample("5min").agg({"high": "max", "low": "min", "close": "last"}).dropna()
+    if len(m5) < 5:
+        return None
+    return float((m5["high"].tail(n) - m5["low"].tail(n)).mean())
 
 
 def backtest_one(args_tuple):
-    asset, date_str = args_tuple
+    # Backward compat : (asset, date) -> defaults; (asset, date, options) -> dict d'options
+    if len(args_tuple) == 2:
+        asset, date_str = args_tuple
+        opts = {}
+    else:
+        asset, date_str, opts = args_tuple
+    apply_sl_min_atr = opts.get("apply_sl_min_atr", False)
+    sl_min_atr_factor = opts.get("sl_min_atr_factor", 0.5)
+    block_hours = set(opts.get("block_hours", []))
+    entry_mode = opts.get("entry_mode", "limit")
+    apply_breakeven_at_R = opts.get("apply_breakeven_at_R", None)
+    latency_s = opts.get("latency_s", 0.0)
+    commission_r = opts.get("commission_r", 0.0)
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -382,7 +457,36 @@ def backtest_one(args_tuple):
                 age_min = (cur - ob_ts).total_seconds() / 60
                 if age_min > CAP_AGE_OB_MIN:
                     continue
+
+                # FIX #3 : Filtre heures pourries (00h, 19-21h UTC)
+                if cur.hour in block_hours:
+                    evaluated.add(key)
+                    continue
+
                 t2 = s["r"].trade_setup
+
+                # FIX #1 : SL minimum base sur ATR M5
+                #   Si le SL naturel de l'OB est < sl_min_atr_factor * ATR_M5,
+                #   on l'elargit (et on recalcule TP pour garder le meme RR).
+                sl_adjusted = t2.stop_loss
+                tp_adjusted = t2.take_profit
+                rr_adjusted = t2.rr
+                sl_was_widened = False
+                if apply_sl_min_atr:
+                    atr_m5 = compute_atr_m5(df_m1, cur, n=20)
+                    if atr_m5 is not None:
+                        sl_dist_natural = abs(t2.entry_price - t2.stop_loss)
+                        sl_dist_min = sl_min_atr_factor * atr_m5
+                        if sl_dist_natural < sl_dist_min:
+                            # Elargir SL et TP pour garder le meme RR
+                            if ob.direction == "bullish":
+                                sl_adjusted = t2.entry_price - sl_dist_min
+                                tp_adjusted = t2.entry_price + sl_dist_min * t2.rr
+                            else:
+                                sl_adjusted = t2.entry_price + sl_dist_min
+                                tp_adjusted = t2.entry_price - sl_dist_min * t2.rr
+                            sl_was_widened = True
+
                 # Capture le contexte HTF
                 htf_ctx = compute_htf_context(df_h1, df_h4, cur)
                 # Recalcul des features ML (compute_asset ne les retourne pas)
@@ -411,8 +515,13 @@ def backtest_one(args_tuple):
                     "weekday": cur.day_name(),
                     "killzone": get_killzone(cur),
                     "ml_proba": proba,
-                    "entry": t2.entry_price, "sl": t2.stop_loss, "tp": t2.take_profit,
-                    "rr": t2.rr,
+                    "entry": t2.entry_price,
+                    "sl": sl_adjusted,    # FIX #1 applique
+                    "tp": tp_adjusted,
+                    "rr": rr_adjusted,
+                    "sl_original": t2.stop_loss,
+                    "tp_original": t2.take_profit,
+                    "sl_was_widened": sl_was_widened,
                     "ob_high": ob.ob_high, "ob_low": ob.ob_low,
                     "ob_size_pct": abs(ob.ob_high - ob.ob_low) / t2.entry_price * 100,
                     # HTF context
@@ -421,8 +530,14 @@ def backtest_one(args_tuple):
                     "features_json": json.dumps({k: float(v) if isinstance(v, (int, float, np.number)) else str(v)
                                                  for k, v in features.items()})[:5000],  # limit pour CSV
                 }
-                # Simulate fill + tracking
-                simulate_limit_with_tracking(row, tick_times, tick_bid, tick_ask, commission_r=0.0)
+                # Simulate fill + tracking (avec FIX #2 et FIX #4)
+                simulate_limit_with_tracking(
+                    row, tick_times, tick_bid, tick_ask,
+                    commission_r=commission_r,
+                    entry_mode=entry_mode,
+                    apply_breakeven_at_R=apply_breakeven_at_R,
+                    latency_s=latency_s,
+                )
                 all_rows.append(row)
                 evaluated.add(key)
             cur += step
@@ -441,6 +556,21 @@ def main():
     p.add_argument("--assets", nargs="+", default=LIVE_ASSETS)
     p.add_argument("--workers", type=int, default=14)
     p.add_argument("--output", default=f"{ROOT}/bt_diagnostic_trades.csv")
+    # === FIXES ===
+    p.add_argument("--entry_mode", default="limit", choices=["limit", "market"],
+                   help="FIX #4 : 'market' entre immediatement au prix marche")
+    p.add_argument("--sl_min_atr", action="store_true",
+                   help="FIX #1 : force SL minimum = sl_min_atr_factor * ATR_M5")
+    p.add_argument("--sl_min_atr_factor", type=float, default=0.5,
+                   help="Facteur multiplicateur ATR (default 0.5)")
+    p.add_argument("--breakeven_at_R", type=float, default=None,
+                   help="FIX #2 : deplace SL a entry quand MFE atteint X*R (ex: 0.5)")
+    p.add_argument("--block_hours", nargs="+", type=int, default=[],
+                   help="FIX #3 : heures UTC a bloquer (ex: 0 1 19 20 21)")
+    p.add_argument("--latency_s", type=float, default=0.0,
+                   help="Latence simulee en s entre placement et execution")
+    p.add_argument("--commission_r", type=float, default=0.0,
+                   help="Commission par trade en R (ex: 0.07 = 7% du risque)")
     args = p.parse_args()
 
     dates = []
@@ -451,14 +581,31 @@ def main():
             dates.append(d.strftime("%Y-%m-%d"))
         d += pd.Timedelta(days=1)
 
+    opts = {
+        "apply_sl_min_atr": args.sl_min_atr,
+        "sl_min_atr_factor": args.sl_min_atr_factor,
+        "block_hours": args.block_hours,
+        "entry_mode": args.entry_mode,
+        "apply_breakeven_at_R": args.breakeven_at_R,
+        "latency_s": args.latency_s,
+        "commission_r": args.commission_r,
+    }
+
     print(f"=== BACKTEST DIAGNOSTIC ULTRA-LOGGE ===")
     print(f"Periode    : {args.start} -> {args.end} ({len(dates)} jours ouvres)")
     print(f"Actifs     : {args.assets} ({len(args.assets)})")
     print(f"Tasks      : {len(dates) * len(args.assets)}")
     print(f"Workers    : {args.workers}")
+    print(f"--- FIXES ---")
+    print(f"  entry_mode      : {args.entry_mode}  (FIX #4)")
+    print(f"  sl_min_atr      : {args.sl_min_atr} (factor={args.sl_min_atr_factor})  (FIX #1)")
+    print(f"  breakeven_at_R  : {args.breakeven_at_R}  (FIX #2)")
+    print(f"  block_hours     : {args.block_hours}  (FIX #3)")
+    print(f"  latency_s       : {args.latency_s}")
+    print(f"  commission_r    : {args.commission_r}")
     print()
 
-    tasks = [(a, d) for a in args.assets for d in dates]
+    tasks = [(a, d, opts) for a in args.assets for d in dates]
     all_rows = []
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
@@ -485,16 +632,22 @@ def main():
         print()
         # Stats rapides
         print("=== STATS RAPIDES ===")
-        for o in ["WIN", "LOSS", "NO_FILL", "INVALID_PRICE", "OPEN"]:
+        for o in ["WIN", "LOSS", "BE", "NO_FILL", "INVALID_PRICE", "OPEN"]:
             n = (df["outcome"] == o).sum()
             print(f"  {o:14}: {n:4d}")
-        fermes = df[df["outcome"].isin(["WIN", "LOSS"])]
+        fermes = df[df["outcome"].isin(["WIN", "LOSS", "BE"])]
         if len(fermes) > 0:
-            wr = (fermes["outcome"] == "WIN").mean() * 100
+            wr_strict = (fermes["outcome"] == "WIN").sum() / max((fermes["outcome"].isin(["WIN", "LOSS"])).sum(), 1) * 100
             pnl = fermes["pnl_r"].sum()
-            print(f"\n  Fermes  : {len(fermes)}")
-            print(f"  WR      : {wr:.1f}%")
-            print(f"  PnL (R) : {pnl:+.2f}")
+            print(f"\n  Fermes (incl BE) : {len(fermes)}")
+            print(f"  WR strict (W/W+L): {wr_strict:.1f}%")
+            print(f"  PnL (R)          : {pnl:+.2f}")
+            if "sl_was_widened" in df.columns:
+                n_widened = df["sl_was_widened"].sum()
+                print(f"  SL elargis (FIX#1): {n_widened}")
+            if "be_triggered" in df.columns:
+                n_be_trig = df["be_triggered"].sum() if df["be_triggered"].dtype != "object" else 0
+                print(f"  BE triggers (FIX#2): {n_be_trig}")
 
 
 if __name__ == "__main__":
