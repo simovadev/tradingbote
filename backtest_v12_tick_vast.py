@@ -101,7 +101,10 @@ def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask):
 
 
 def backtest_asset(args_tuple):
-    asset, date_str, step = args_tuple
+    # args : (asset, date_str, step, scan_start_str, scan_end_str)
+    # scan_start/end = fenetre de DETECTION (pour paralleliser). Les ticks
+    # couvrent toute la journee donc les trades ne sont jamais coupes.
+    asset, date_str, step, scan_start_str, scan_end_str = args_tuple
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -118,8 +121,9 @@ def backtest_asset(args_tuple):
         from bot_v2.concepts.daily_bias import build_d1_from_h1
 
         day = _pd.Timestamp(date_str, tz="UTC")
-        start = day
-        end = day + _pd.Timedelta(hours=23, minutes=59)
+        # Fenetre de detection (sous-periode pour parallelisme)
+        start = _pd.Timestamp(scan_start_str, tz="UTC")
+        end = _pd.Timestamp(scan_end_str, tz="UTC")
 
         # Bougies depuis data_vantage (avec buffer 60j amont)
         ws = start - _pd.Timedelta(days=60)
@@ -215,16 +219,33 @@ def main():
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
     p.add_argument("--assets", nargs="+", default=LIVE_ASSETS)
     p.add_argument("--step", type=int, default=5)
-    p.add_argument("--workers", type=int, default=14)
+    p.add_argument("--workers", type=int, default=128)
+    p.add_argument("--scan_hours", type=int, default=2,
+                   help="Decoupe la detection en fenetres de X heures (parallelisme)")
     args = p.parse_args()
 
+    day = pd.Timestamp(args.date, tz="UTC")
+    # Decoupe la journee en fenetres de detection de scan_hours
+    windows = []
+    cur = day
+    day_end = day + pd.Timedelta(hours=24)
+    while cur < day_end:
+        nxt = min(cur + pd.Timedelta(hours=args.scan_hours), day_end)
+        windows.append((str(cur), str(nxt)))
+        cur = nxt
+
     print(f"=== BACKTEST TICK PAR TICK (VAST) ===", flush=True)
-    print(f"Date    : {args.date}", flush=True)
-    print(f"Actifs  : {len(args.assets)}", flush=True)
-    print(f"Workers : {args.workers}", flush=True)
+    print(f"Date          : {args.date}", flush=True)
+    print(f"Actifs        : {len(args.assets)}", flush=True)
+    print(f"Fenetres scan : {len(windows)} x {args.scan_hours}h", flush=True)
+    print(f"Tasks         : {len(args.assets) * len(windows)}", flush=True)
+    print(f"Workers       : {args.workers}", flush=True)
     print()
 
-    tasks = [(a, args.date, args.step) for a in args.assets]
+    tasks = []
+    for a in args.assets:
+        for (ws, we) in windows:
+            tasks.append((a, args.date, args.step, ws, we))
     results = []
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
@@ -245,26 +266,42 @@ def main():
     print(f"\n=== TERMINE en {elapsed/60:.1f}min ===")
 
     ok = [r for r in results if r.get("ok")]
-    tot_closed = sum(r["n_closed"] for r in ok)
-    tot_win = sum(r["n_win"] for r in ok)
-    tot_pnl = sum(r["pnl_r"] for r in ok)
-    wr = (tot_win / tot_closed * 100) if tot_closed else 0
-    print(f"\n=== RECAP GLOBAL TICK ===")
-    print(f"  Trades fermes : {tot_closed}")
-    print(f"  WR            : {wr:.1f}%")
-    print(f"  PnL (R)       : {tot_pnl:+.1f}")
-    print(f"  NO_FILL       : {sum(r['n_nofill'] for r in ok)}")
-    print(f"  OPEN          : {sum(r['n_open'] for r in ok)}")
-    print(f"\n  Par actif :")
-    for r in sorted(ok, key=lambda x: x["asset"]):
-        if r["n_closed"]:
-            print(f"    {r['asset']:8s} : {r['n_closed']:3d} trades, WR={r['wr']:5.1f}%, PnL={r['pnl_r']:+.1f}R")
 
-    # Save journal
-    import json
+    # Collecte TOUS les trades et DEDUPLIQUE (un OB peut etre vu dans 2 fenetres
+    # contigues si a cheval). Cle = (instrument, ob_ts, direction).
     all_tr = []
     for r in ok:
         all_tr.extend(r.get("trades", []))
+    seen = set()
+    dedup = []
+    for t in all_tr:
+        key = (t["instrument"], t["ob_ts"], t["direction"])
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(t)
+    all_tr = dedup
+
+    closed = [t for t in all_tr if t["outcome"] in ("WIN", "LOSS")]
+    tot_closed = len(closed)
+    tot_win = sum(1 for t in closed if t["outcome"] == "WIN")
+    tot_pnl = sum(t["pnl_r"] for t in closed)
+    wr = (tot_win / tot_closed * 100) if tot_closed else 0
+    print(f"\n=== RECAP GLOBAL TICK (dedup) ===")
+    print(f"  Trades fermes : {tot_closed}")
+    print(f"  WR            : {wr:.1f}%")
+    print(f"  PnL (R)       : {tot_pnl:+.1f}")
+    print(f"  NO_FILL       : {sum(1 for t in all_tr if t['outcome']=='NO_FILL')}")
+    print(f"  OPEN          : {sum(1 for t in all_tr if t['outcome']=='OPEN')}")
+    print(f"\n  Par actif :")
+    by_a = {}
+    for t in closed:
+        by_a.setdefault(t["instrument"], []).append(t)
+    for a in sorted(by_a):
+        ts = by_a[a]
+        w = sum(1 for x in ts if x["outcome"] == "WIN")
+        print(f"    {a:8s} : {len(ts):3d} trades, WR={w/len(ts)*100:5.1f}%, PnL={sum(x['pnl_r'] for x in ts):+.1f}R")
+
     out = f"{ROOT}/bt_tick_{args.date.replace('-','')}_trades.csv"
     if all_tr:
         pd.DataFrame(all_tr).to_csv(out, index=False)
