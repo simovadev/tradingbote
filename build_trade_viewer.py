@@ -215,8 +215,16 @@ function showTrade(idx) {{
     ${{t.exit_ts ? `<div><span>Exit :</span> ${{t.exit_ts}}</div>` : ''}}
   `;
 
-  // Auto-zoom to relevant range
+  // === Auto-zoom force sur la nouvelle plage ===
+  // 1. Reset time scale pour voir toutes les bougies
   chart.timeScale().fitContent();
+  // 2. Force le price scale a se reajuster (autoscale = true)
+  candleSeries.priceScale().applyOptions({{ autoScale: true }});
+  // 3. Re-fit apres un petit delay (pour laisser le temps a setData de propager)
+  setTimeout(() => {{
+    chart.timeScale().fitContent();
+    candleSeries.priceScale().applyOptions({{ autoScale: true }});
+  }}, 50);
 }}
 
 function applyFilters() {{

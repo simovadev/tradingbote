@@ -1255,21 +1255,22 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
 
     # DEBUG V8 (2026-05-21) : trace avant l'envoi de l'ordre
     log.info(
-        f"DEBUG {instrument} : avant place_limit_order | lots={lots} "
-        f"entry={entry_price} sl={sl_price} tp={tp_price}"
+        f"DEBUG {instrument} : avant place_market_order | lots={lots} "
+        f"sl={sl_price} tp={tp_price}"
     )
 
-    # V2 : Place un ordre LIMIT au prix de l'OB (= comportement backtest).
-    # Si prix touche entry_price -> fill au prix exact. Si non -> expire en 60min.
-    result = mt5_exec.place_limit_order(
+    # V12 (2026-05-23) : MARKET au lieu de LIMIT.
+    # Analyse visuelle des 18 trades du backtest 15/05 : ML prediction direction
+    # correcte sur 5/5 trades valides, mais LIMIT a ob_high rate 4/5 setups
+    # car le mouvement directionnel part sans retest (selection bias inverse).
+    # MARKET = entree immediate au prix marche, capture le mouvement directionnel.
+    result = mt5_exec.place_market_order(
         symbol=instrument,
         direction=setup.direction,
         volume=lots,
-        entry_price=entry_price,
         sl=sl_price,
         tp=tp_price,
-        expiration_minutes=30,  # = max_bars_to_fill du backtest (30 bougies M1)
-        comment=f"V2-{ob.direction[0].upper()} ml={setup_dict['proba']:.2f}",
+        comment=f"V12-MKT-{ob.direction[0].upper()} ml={setup_dict['proba']:.2f}",
         magic=BOT_MAGIC,
     )
 
