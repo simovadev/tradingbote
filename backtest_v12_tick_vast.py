@@ -62,7 +62,7 @@ class TradeRec:
     pnl_r: float = 0.0
 
 
-def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask):
+def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask, commission_r=0.0):
     placed = pd.Timestamp(rec.placed_ts).value
     expire = placed + EXPIRE_PENDING_MIN * 60 * 1_000_000_000
     n = len(tick_times)
@@ -112,28 +112,32 @@ def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask):
     for i in range(fill_idx + 1, n):
         if rec.direction == "bullish":
             if tick_bid[i] <= rec.sl:
-                rec.outcome = "LOSS"; rec.pnl_r = -1.0
+                rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
             if tick_bid[i] >= rec.tp:
-                rec.outcome = "WIN"; rec.pnl_r = rec.rr
+                rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
         else:
             if tick_ask[i] >= rec.sl:
-                rec.outcome = "LOSS"; rec.pnl_r = -1.0
+                rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
             if tick_ask[i] <= rec.tp:
-                rec.outcome = "WIN"; rec.pnl_r = rec.rr
+                rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
     rec.outcome = "OPEN"
 
 
-def simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask):
+def simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask,
+                             latency_s=0, commission_r=0.0):
     """Entree MARKET : on entre AU PRIX MARCHE des le placement (pas de retracement).
     SL/TP gardent leurs niveaux absolus (= ceux de l'OB). Le PnL en R est
-    recalcule depuis le VRAI prix d'entree marche (RR effectif different du RR
-    theorique car l'entree n'est pas pile sur l'OB).
+    recalcule depuis le VRAI prix d'entree marche.
+
+    latency_s : delai (s) entre decision et execution -> on entre au prix
+                qu'il y avait latency_s APRES le placement (realisme VPS/MT5).
+    commission_r : cout en R par trade (ex: 0.07 = 7% du risque). Deduit du PnL.
     """
-    placed = pd.Timestamp(rec.placed_ts).value
+    placed = pd.Timestamp(rec.placed_ts).value + int(latency_s * 1_000_000_000)
     n = len(tick_times)
     ref_idx = None
     for i in range(n):
@@ -169,21 +173,21 @@ def simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask):
         if entry_mkt >= rec.sl:
             rec.outcome = "INVALID_PRICE"; return
 
-    # Suit les ticks pour SL/TP
+    # Suit les ticks pour SL/TP (commission deduite du PnL R)
     for i in range(ref_idx + 1, n):
         if rec.direction == "bullish":
             if tick_bid[i] <= rec.sl:
-                rec.outcome = "LOSS"; rec.pnl_r = -1.0
+                rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
             if tick_bid[i] >= rec.tp:
-                rec.outcome = "WIN"; rec.pnl_r = rec.rr
+                rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
         else:
             if tick_ask[i] >= rec.sl:
-                rec.outcome = "LOSS"; rec.pnl_r = -1.0
+                rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
             if tick_ask[i] <= rec.tp:
-                rec.outcome = "WIN"; rec.pnl_r = rec.rr
+                rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
     rec.outcome = "OPEN"
 
@@ -193,7 +197,7 @@ def backtest_asset(args_tuple):
     # scan_start/end = fenetre de DETECTION (pour paralleliser). Les ticks
     # couvrent toute la journee donc les trades ne sont jamais coupes.
     # entry_mode : "limit" (defaut, retracement) ou "market" (entree immediate)
-    asset, date_str, step, scan_start_str, scan_end_str, entry_mode = args_tuple
+    asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r = args_tuple
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -285,9 +289,11 @@ def backtest_asset(args_tuple):
 
         for rec in active:
             if entry_mode == "market":
-                simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask)
+                simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask,
+                                         latency_s=latency_s, commission_r=commission_r)
             else:
-                simulate_on_ticks(rec, tick_times, tick_bid, tick_ask)
+                simulate_on_ticks(rec, tick_times, tick_bid, tick_ask,
+                                  commission_r=commission_r)
 
         closed = [t for t in active if t.outcome in ("WIN", "LOSS")]
         wr = (sum(1 for t in closed if t.outcome == "WIN") / len(closed) * 100) if closed else 0
@@ -316,6 +322,10 @@ def main():
                    help="Decoupe la detection en fenetres de X heures (parallelisme)")
     p.add_argument("--entry_mode", default="limit", choices=["limit", "market"],
                    help="limit (retracement) ou market (entree immediate a la validation)")
+    p.add_argument("--latency_s", type=float, default=0.0,
+                   help="Latence en s entre decision et execution (realisme VPS/MT5). Default 0.")
+    p.add_argument("--commission_r", type=float, default=0.0,
+                   help="Commission par trade en R (ex: 0.07 = 7%% du risque). Default 0.")
     args = p.parse_args()
 
     day = pd.Timestamp(args.date, tz="UTC")
@@ -335,12 +345,15 @@ def main():
     print(f"Tasks         : {len(args.assets) * len(windows)}", flush=True)
     print(f"Workers       : {args.workers}", flush=True)
     print(f"Entry mode    : {args.entry_mode.upper()}", flush=True)
+    print(f"Latence       : {args.latency_s}s", flush=True)
+    print(f"Commission/R  : {args.commission_r:.3f} (= {args.commission_r*100:.1f}% du risque par trade)", flush=True)
     print()
 
     tasks = []
     for a in args.assets:
         for (ws, we) in windows:
-            tasks.append((a, args.date, args.step, ws, we, args.entry_mode))
+            tasks.append((a, args.date, args.step, ws, we, args.entry_mode,
+                          args.latency_s, args.commission_r))
     results = []
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
