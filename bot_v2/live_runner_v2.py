@@ -34,6 +34,7 @@ import logging
 import os
 import pickle
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1851,6 +1852,7 @@ def run_live(test_dry_run: bool = False):
     # donc le live aussi.
     BOT_START_TS = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=30)
     log.info(f"BOT_START_TS = {BOT_START_TS} (setups anterieurs a -30min ignores - aligne OOS)")
+    log.info("SCAN MODE = sync close M1 (1 scan par bougie fermee, aligne 100% backtest)")
 
     # V5.4 : init DataBuffer pour chaque actif (charge parquet 7mois + comble trou via MT5)
     log.info("=" * 70)
@@ -2228,7 +2230,17 @@ def run_live(test_dry_run: bool = False):
                 except Exception:
                     pass
 
-            time.sleep(SCAN_INTERVAL_SEC)
+            # V12 (2026-05-23) : scan synchronise sur la close des bougies M1.
+            # Au lieu de sleep(5s) en boucle ouverte (3-4 scans sur la meme bougie),
+            # on dort jusqu'a 3s APRES la prochaine minute. Garantit 1 scan par
+            # bougie fermee, exactement comme le backtest. Aligne 100% live/backtest.
+            now_utc = datetime.now(timezone.utc)
+            next_min = (now_utc.replace(second=0, microsecond=0)
+                        + pd.Timedelta(minutes=1)
+                        + pd.Timedelta(seconds=3))
+            sleep_sec = (next_min - now_utc).total_seconds()
+            if sleep_sec > 0:
+                time.sleep(sleep_sec)
 
     except KeyboardInterrupt:
         log.info("Arret manuel (Ctrl+C)")
