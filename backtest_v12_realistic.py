@@ -283,20 +283,13 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp,
                 direction = ob.direction
                 key = (a, str(ob_ts), direction)
 
-                # _evaluated_obs : 1 OB = 1 evaluation (sauf besoin stability)
-                if str(ob_ts) in evaluated_obs[a] and key in proba_history:
-                    # OB deja vu, on continue stability check
-                    pass
-
-                # V11.1 : check stabilite
-                proba_history[key].append((cur, proba))
-                if len(proba_history[key]) >= STABILITY_MIN_CYCLES:
-                    recent = [p for _, p in proba_history[key][-STABILITY_MIN_CYCLES:]]
-                    gap = max(recent) - min(recent)
-                    if gap > STABILITY_MAX_GAP:
-                        continue  # instable, on attend
-                else:
-                    continue  # pas encore assez de cycles
+                # V12 : PAS de check stabilite V11.1.
+                # En V11, les snapshots K=[3,7,15] faisaient bouger la proba entre
+                # 2 cycles (car le ML voyait des bougies futures different selon K).
+                # En V12, le ML ne voit QUE l'amont de l'OB (cache filtre <= vi)
+                # -> la proba est figee des la validation de l'OB, elle ne change
+                # jamais. Attendre 2 cycles = retard inutile qui augmente NO_FILL.
+                # On trade IMMEDIATEMENT a la validation (logique ICT/SMC pure).
 
                 # Cap age OB (V11.2)
                 age = (cur - ob_ts).total_seconds() / 60

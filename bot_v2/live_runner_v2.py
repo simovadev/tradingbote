@@ -2094,21 +2094,27 @@ def run_live(test_dry_run: bool = False):
                         setup_key = (asset, str(setup['ts']))
 
                         # === V11.1 : check stabilite de la proba ML ===
-                        # Enregistre la proba actuelle pour cet OB et verifie qu'elle
-                        # est stable sur les dernieres evaluations. Evite les "faux pics"
-                        # causes par les features ML partielles juste apres validation.
-                        _proba_key = (asset, str(setup['ts']), setup['ob'].direction)
-                        PROBA_HISTORY.setdefault(_proba_key, []).append((now, float(setup['proba'])))
-                        if len(PROBA_HISTORY[_proba_key]) > 10:
-                            PROBA_HISTORY[_proba_key] = PROBA_HISTORY[_proba_key][-10:]
-                        is_stable, unstable_reason = _is_stable(PROBA_HISTORY[_proba_key])
-                        if not is_stable:
-                            recent = [f"{p:.2f}" for _, p in PROBA_HISTORY[_proba_key][-3:]]
-                            log.info(
-                                f"WAIT_STABILITY {asset} {setup['ob'].direction} "
-                                f"ts={setup['ts']} probas={recent} ({unstable_reason})"
-                            )
-                            continue
+                        # Skip ce check si on est sur un modele V12 (PUR AMONT) :
+                        # le ML ne voit QUE le passe de l'OB, la proba est figee
+                        # des la validation. Attendre 2 cycles = retard inutile.
+                        # V11.1 servait uniquement a compenser le leakage V11
+                        # (probas oscillantes a cause des snapshots K=[3,7,15]).
+                        _loaded = load_model(asset)
+                        _is_v12 = (_loaded is not None
+                                   and "snapshot_k" not in _loaded[1])
+                        if not _is_v12:
+                            _proba_key = (asset, str(setup['ts']), setup['ob'].direction)
+                            PROBA_HISTORY.setdefault(_proba_key, []).append((now, float(setup['proba'])))
+                            if len(PROBA_HISTORY[_proba_key]) > 10:
+                                PROBA_HISTORY[_proba_key] = PROBA_HISTORY[_proba_key][-10:]
+                            is_stable, unstable_reason = _is_stable(PROBA_HISTORY[_proba_key])
+                            if not is_stable:
+                                recent = [f"{p:.2f}" for _, p in PROBA_HISTORY[_proba_key][-3:]]
+                                log.info(
+                                    f"WAIT_STABILITY {asset} {setup['ob'].direction} "
+                                    f"ts={setup['ts']} probas={recent} ({unstable_reason})"
+                                )
+                                continue
 
                         # Skip si deja vu il y a moins de 30 min
                         if setup_key in state._seen_setups:
