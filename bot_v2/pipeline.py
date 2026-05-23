@@ -179,14 +179,16 @@ def evaluate_ob(
 
     # Forex : blocage horaire NY 21h-02h (volatilite morte).
     # USDJPY exclu : la paire JPY est active en Asia.
-    if is_forex and instrument != "USDJPY":
-        from bot_v2.concepts.killzones import to_ny_time
-        ny_ts = to_ny_time(ob.validation_ts)
-        ny_hour = ny_ts.hour
-        if ny_hour >= 21 or ny_hour < 2:
-            res.killzone_ok = False
-            res.rejection_reason = f"Forex bloque overnight US ({ny_hour}h NY)"
-            return res
+    # V12 test (2026-05-23) : filtre DESACTIVE pour voir si forex/or trade enfin.
+    # Si oui -> filtre etait trop strict, on l'ajuste. Si non -> ML severe.
+    # if is_forex and instrument != "USDJPY":
+    #     from bot_v2.concepts.killzones import to_ny_time
+    #     ny_ts = to_ny_time(ob.validation_ts)
+    #     ny_hour = ny_ts.hour
+    #     if ny_hour >= 21 or ny_hour < 2:
+    #         res.killzone_ok = False
+    #         res.rejection_reason = f"Forex bloque overnight US ({ny_hour}h NY)"
+    #         return res
 
     if kz is None:
         res.killzone_ok = False
