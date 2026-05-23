@@ -425,11 +425,14 @@ def backtest_asset(args_tuple):
         active = []
         evaluated = set()
         cur = start
+        # V13 (2026-05-24) : N_BARS_M1 = 8000 au lieu de 88000.
+        # Doit MATCHER N_BARS_M1 de live_runner_v2.py / cache_daemon.py.
+        N_BARS_M1_BT = 8000
         n_setups = 0
         while cur <= end:
             cut = cur
             ie = df_m1.index.searchsorted(cut, side="right")
-            sub_start = max(0, ie - 88000)
+            sub_start = max(0, ie - N_BARS_M1_BT)
             sub_m1 = df_m1.iloc[sub_start:ie]
             if len(sub_m1) < 200:
                 cur += _pd.Timedelta(minutes=step); continue

@@ -52,7 +52,10 @@ LIVE_ASSETS = [
     "USDCAD", "USDCHF",
 ]
 
-N_BARS_M1 = 88000
+# V13 (2026-05-24) : reduit de 88000 a 8000 (cf live_runner_v2 pour details).
+# DOIT etre IDENTIQUE a N_BARS_M1 dans live_runner_v2 (sinon mismatch
+# df_m1_last_ts -> bot tombe en fallback recalcul a chaque cycle).
+N_BARS_M1 = 8000
 N_BARS_M15 = 11000
 N_BARS_H1 = 2800
 

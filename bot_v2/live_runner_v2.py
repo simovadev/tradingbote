@@ -131,7 +131,14 @@ BOT_MAGIC = 20260517
 #   - df_htf2 (H1) : chunk + 30j buffer = ~2800 H1
 #   - df_d1 : ~120 D1 (4 mois)
 # Le LIVE doit utiliser les MEMES tailles pour matcher les features.
-N_BARS_M1 = 88000    # = chunk 3 mois training (~88k)
+# V13 (2026-05-24) : reduction massive grace au refactor atr_regime par killzone.
+# Avant V12 : 88000 (3 mois) car atr_regime regardait 43200 bougies = 30 jours.
+# Apres V13 : 8000 (5.5 jours) suffisent. Max lookback de toutes les features :
+#   - atr_regime_v13 : 7200 bougies = 5 jours (cap dur 14400 = 10j)
+#   - 58 autres features : <= 240 bougies = 4h max
+# Gain compute par actif : ~1.7s -> ~0.2s (90% reduction).
+# Bot 14 actifs : 9s/cycle -> ~1-2s sur PC, 17s -> ~3s sur VPS.
+N_BARS_M1 = 8000     # V13 : 5.5j de marge
 N_BARS_M15 = 11000   # = chunk + buffer 4 mois training
 N_BARS_H1 = 2800     # = chunk + buffer 4 mois training
 N_BARS_D1 = 120      # = chunk + buffer 4 mois training
