@@ -234,8 +234,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V12 > V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3_5 > V2 legacy
+    # Cascade : V13 > V12 > V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3_5 > V2 legacy
     candidates = [
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v13.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v13.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v12.pkl",
          BOT_V2_DIR / f"ml_features_{instrument}_vantage_v12.json"),
         (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v11.pkl",
@@ -263,7 +265,9 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v12" in mp.name:
+            if "_vantage_v13" in mp.name:
+                version = "V13-Vantage-AtrRegimePerKZ"
+            elif "_vantage_v12" in mp.name:
                 version = "V12-Vantage-PureAmont-NoLeakage"
             elif "_vantage_v11" in mp.name:
                 version = "V11-Vantage-RealisticTraining"

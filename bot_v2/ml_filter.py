@@ -187,6 +187,133 @@ def predict_proba_for_tf(r, ob, instrument: str, tf: str = "M1") -> float | None
     return float(model.predict_proba(X)[0, 1])
 
 
+# ============================================================================
+# V13 (2026-05-23) : atr_regime par killzone
+# ============================================================================
+
+# Cap dur de lookback pour atr_regime_v13 : 10 jours = 14400 M1.
+# En pratique 5 jours (7200) suffisent quand le marche est ouvert en continu.
+_ATR_REGIME_V13_MAX_LOOKBACK = 14400
+# Cible : 5 instances passees de la meme killzone
+_ATR_REGIME_V13_N_TYPICAL = 5
+# Fenetre courante pour le fallback hors KZ
+_ATR_REGIME_V13_FALLBACK_WIN = 60
+
+
+def _compute_atr_regime_v13(df_ltf, idx, current_kz_name):
+    """ATR de la killzone courante / moyenne ATR des 5 dernieres MEMES KZ.
+
+    Retourne 1.0 (neutre) si pas assez d'historique ou erreur.
+
+    Args:
+        df_ltf: DataFrame M1 avec colonnes high/low et index timestamp.
+        idx: int, position de validation de l'OB dans df_ltf.
+        current_kz_name: nom de la killzone courante (str ou None).
+                         Si None : fallback fenetre 60 M1 a la meme heure UTC.
+
+    Returns:
+        float : ratio atr_now / atr_typical, ou 1.0 si indeterminable.
+    """
+    if df_ltf is None or idx is None or idx < 60:
+        return 1.0
+    try:
+        from bot_v2.concepts.killzones import killzone_at
+    except Exception:
+        return 1.0
+
+    # Fenetre de lookback : on prend au plus _MAX_LOOKBACK bougies M1 en arriere
+    # (10 jours), mais sans depasser l'index 0.
+    start = max(0, idx - _ATR_REGIME_V13_MAX_LOOKBACK)
+    if idx - start < 240:
+        # Pas assez d'historique pour calculer quoi que ce soit de sense.
+        return 1.0
+
+    highs = df_ltf["high"].values
+    lows = df_ltf["low"].values
+    ts_index = df_ltf.index
+
+    # --- Cas 1 : on est dans une killzone connue ---
+    if current_kz_name is not None:
+        # ATR depuis le debut de la KZ courante (en remontant tant qu'on y est).
+        # On limite a 240 bougies (4h) pour eviter de trainer si la KZ est tres longue
+        # ou si on est tombe pile au demarrage d'une KZ qui chevauche un trou.
+        kz_start = idx
+        for j in range(idx - 1, max(idx - 240, start) - 1, -1):
+            if killzone_at(ts_index[j]) == current_kz_name:
+                kz_start = j
+            else:
+                break
+        if kz_start >= idx:
+            # Cas degenere : pas de bougie de la KZ courante avant idx
+            return 1.0
+        atr_now = float((highs[kz_start:idx] - lows[kz_start:idx]).mean())
+        if atr_now <= 0:
+            return 1.0
+
+        # Collecter les ATR des 5 dernieres instances PASSEES de la meme KZ.
+        # On scanne en arriere en groupant les bougies consecutives de la meme KZ.
+        atr_history = []
+        cur_end = None  # fin (exclusive) du bloc en cours
+        in_block = False
+        j = kz_start - 1
+        while j >= start and len(atr_history) < _ATR_REGIME_V13_N_TYPICAL:
+            if killzone_at(ts_index[j]) == current_kz_name:
+                if not in_block:
+                    cur_end = j + 1
+                    in_block = True
+                j -= 1
+            else:
+                if in_block:
+                    # On vient de sortir d'un bloc -> calcul ATR de [j+1, cur_end)
+                    blk_start = j + 1
+                    if cur_end - blk_start >= 5:  # min 5 bougies pour etre valable
+                        blk_atr = float((highs[blk_start:cur_end] - lows[blk_start:cur_end]).mean())
+                        if blk_atr > 0:
+                            atr_history.append(blk_atr)
+                    in_block = False
+                j -= 1
+        # Si on est sorti de la boucle en plein bloc, le finaliser
+        if in_block and cur_end is not None:
+            blk_start = max(j + 1, start)
+            if cur_end - blk_start >= 5:
+                blk_atr = float((highs[blk_start:cur_end] - lows[blk_start:cur_end]).mean())
+                if blk_atr > 0:
+                    atr_history.append(blk_atr)
+
+        if not atr_history:
+            return 1.0
+        atr_typical = sum(atr_history) / len(atr_history)
+        return atr_now / atr_typical if atr_typical > 0 else 1.0
+
+    # --- Cas 2 : hors killzone -> fallback fenetre 60 M1 a la meme heure UTC ---
+    win = _ATR_REGIME_V13_FALLBACK_WIN
+    atr_now = float((highs[idx - win:idx] - lows[idx - win:idx]).mean())
+    if atr_now <= 0:
+        return 1.0
+
+    # Pour chacune des 5 derniers jours, prendre la meme fenetre [ts - N jours]
+    # et calculer son ATR sur win bougies M1.
+    ts_now = ts_index[idx]
+    atr_history = []
+    for d in range(1, _ATR_REGIME_V13_N_TYPICAL + 1):
+        ts_target = ts_now - pd.Timedelta(days=d)
+        # searchsorted retourne le 1er index >= ts_target
+        try:
+            j = ts_index.searchsorted(ts_target, side="right")
+        except Exception:
+            continue
+        if j < win or j > idx:
+            continue
+        blk_atr = float((highs[j - win:j] - lows[j - win:j]).mean())
+        if blk_atr > 0:
+            atr_history.append(blk_atr)
+
+    if not atr_history:
+        return 1.0
+    atr_typical = sum(atr_history) / len(atr_history)
+    return atr_now / atr_typical if atr_typical > 0 else 1.0
+
+
 def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None) -> dict:
     """Reproduit EXACTEMENT les features V3.5/V4/V5 du dataset ML (ml_dataset.py _extract_features).
 
@@ -379,17 +506,14 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
         f["body_ratio_recent"] = 0.5
         f["mom_aligned"] = 0
 
-    # --- Groupe D : regime de volatilite (calme vs agite) ---
-    if df_ltf is not None and idx is not None and idx >= 1440:
-        # ATR du "jour" (240 dernieres M1) vs ATR 30j (~43200 M1, cape a dispo)
-        sl_day = df_ltf.iloc[max(0, idx - 240):idx]
-        atr_day = float((sl_day["high"] - sl_day["low"]).mean())
-        n_long = min(idx, 43200)
-        sl_long = df_ltf.iloc[idx - n_long:idx]
-        atr_long = float((sl_long["high"] - sl_long["low"]).mean())
-        f["atr_regime"] = (atr_day / atr_long) if atr_long > 0 else 1.0
-    else:
-        f["atr_regime"] = 1.0
+    # --- Groupe D : regime de volatilite (V13 2026-05-23 : par killzone) ---
+    # V12 comparait ATR(4h) / ATR(30 jours = 43200 M1), forcant N_BARS_M1=88k.
+    # V13 : ATR de la KZ courante / moyenne ATR des 5 dernieres MEMES KZ.
+    # Lookback max : ~7200 M1 (5 jours), exceptionnellement 14400 (10j) si trous.
+    # Hors KZ : fallback fenetre 60 M1 vs meme fenetre les 5 derniers jours.
+    # Coherent avec une strategie M1 ICT/SMC (la volatilite depend de la session,
+    # pas d'une moyenne 30j qui melange jours actifs et week-ends fermes).
+    f["atr_regime"] = _compute_atr_regime_v13(df_ltf, idx, r.killzone_name)
 
     # --- Groupe E : distance aux niveaux daily en ATR (pas en %) ---
     atr_ref = f.get("atr_at_setup", 0.0) or 0.0
