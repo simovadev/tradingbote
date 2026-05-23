@@ -254,8 +254,10 @@ def main():
     p.add_argument("--start", default="2026-02-20")
     p.add_argument("--end", default="2026-05-20")
     p.add_argument("--step", type=int, default=5)
-    p.add_argument("--workers", type=int, default=60,
-                   help="Nb taches en parallele (default 60 = 20 configs x 3 actifs)")
+    p.add_argument("--workers", type=int, default=128,
+                   help="Nb taches en parallele (default 128, max conseille EPYC)")
+    p.add_argument("--split_days", type=int, default=7,
+                   help="Decoupe periode en sous-periodes de X jours (default 7 = saturer Vast)")
     args = p.parse_args()
 
     print(f"=== GRID SEARCH V12 ===", flush=True)
@@ -267,10 +269,28 @@ def main():
     print(f"Workers  : {args.workers}", flush=True)
     print()
 
+    # PARALLELISATION MASSIVE : decoupe la periode en sous-periodes pour
+    # maximiser le nb de taches (et donc l'utilisation des cores Vast).
+    # 1 tache = 1 config x 1 actif x 1 sous-periode.
+    start_ts = pd.Timestamp(args.start, tz="UTC")
+    end_ts = pd.Timestamp(args.end, tz="UTC")
+    if end_ts.hour == 0 and end_ts.minute == 0:
+        end_ts = end_ts + pd.Timedelta(hours=23, minutes=59)
+    sub_step = pd.Timedelta(days=args.split_days)
+    sub_periods = []
+    cur = start_ts
+    while cur < end_ts:
+        nxt = min(cur + sub_step, end_ts)
+        sub_periods.append((str(cur), str(nxt)))
+        cur = nxt
+
     tasks = []
     for c in CONFIGS:
         for a in args.assets:
-            tasks.append((c, a, args.start, args.end, args.step))
+            for (ps, pe) in sub_periods:
+                tasks.append((c, a, ps, pe, args.step))
+    print(f"Sub-periodes : {len(sub_periods)} x {args.split_days}j", flush=True)
+    print(f"Tasks reelles : {len(tasks)}", flush=True)
 
     results = []
     t0 = time.time()
@@ -301,8 +321,8 @@ def main():
     # Tri par PnL
     ok_results = [r for r in results if r.get("ok")]
 
-    # === RECAP PAR CONFIG (agrege sur tous actifs) ===
-    print("\n=== RECAP PAR CONFIG (somme des 3 actifs) ===", flush=True)
+    # === RECAP PAR CONFIG (agrege sur tous actifs + sous-periodes) ===
+    print("\n=== RECAP PAR CONFIG (somme tous actifs et sous-periodes) ===", flush=True)
     by_config = {}
     for r in ok_results:
         c = r["config_name"]
@@ -320,15 +340,21 @@ def main():
         print(f"{c:<37}{s['n_closed']:<8}{wr:<8.1f}{s['pnl_r']:<+10.1f}{s['n_nofill']:<8}",
               flush=True)
 
-    # === DETAIL PAR ACTIF (pour voir bloqueurs forex) ===
-    print("\n=== DETAIL PAR ACTIF ===", flush=True)
+    # === DETAIL PAR (CONFIG x ACTIF) - agrege sur sous-periodes ===
+    print("\n=== DETAIL PAR (CONFIG x ACTIF) ===", flush=True)
     print(f"{'CONFIG':<37}{'ACTIF':<10}{'Trades':<8}{'WR':<8}{'PnL(R)':<10}")
     print("-" * 80)
-    # Sort by config then asset
-    ok_sorted = sorted(ok_results, key=lambda r: (r["config_name"], r["asset"]))
-    for r in ok_sorted:
-        print(f"{r['config_name']:<37}{r['asset']:<10}{r['n_closed']:<8}"
-              f"{r['wr']:<8.1f}{r['pnl_r']:<+10.1f}",
+    by_ca = {}
+    for r in ok_results:
+        k = (r["config_name"], r["asset"])
+        if k not in by_ca:
+            by_ca[k] = {"n_closed": 0, "n_wins": 0, "pnl_r": 0.0}
+        by_ca[k]["n_closed"] += r["n_closed"]
+        by_ca[k]["n_wins"] += r["n_wins"]
+        by_ca[k]["pnl_r"] += r["pnl_r"]
+    for (c, a), s in sorted(by_ca.items()):
+        wr = (s["n_wins"] / s["n_closed"] * 100) if s["n_closed"] else 0
+        print(f"{c:<37}{a:<10}{s['n_closed']:<8}{wr:<8.1f}{s['pnl_r']:<+10.1f}",
               flush=True)
 
     # Save JSON
