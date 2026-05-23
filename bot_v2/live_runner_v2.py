@@ -311,6 +311,64 @@ def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, m
 # ========== PIPELINE PAR ACTIF (split fetch / compute pour ProcessPool) ==========
 
 
+# === CACHE DAEMON (2026-05-23) ===
+# Le cache_daemon.py calcule en continu les structures lourdes (OB, FVG,
+# breakers, swings, structure_breaks) et les ecrit dans data_cache/<ASSET>.pkl.
+# compute_asset essaie d'abord de lire ce pickle pour eviter de recalculer.
+# Fallback automatique sur le calcul direct si pickle manquant/stale/incoherent.
+# Gain attendu : cache_build 5.2s -> ~0.3s par actif sur VPS.
+import pickle as _pickle
+import pathlib as _pathlib
+from datetime import datetime as _datetime, timezone as _timezone
+
+_CACHE_DAEMON_DIR = _pathlib.Path(__file__).resolve().parent.parent / "data_cache"
+_CACHE_MAX_AGE_SEC = 120  # daemon vieux > 2 min = considere down -> fallback
+
+
+def try_load_cache_from_daemon(instrument: str, df_m1_last_ts) -> dict | None:
+    """Tente de charger le cache calcule par le daemon.
+
+    Conditions de validite (sinon retourne None -> fallback recalcul) :
+      1. Le fichier existe
+      2. computed_at < CACHE_MAX_AGE_SEC (daemon vivant)
+      3. df_m1_last_ts du cache == df_m1_last_ts du live (meme bougie)
+
+    Returns le dict {obs, swings_ltf, fvgs_ltf, breakers_ltf, obs_htf,
+    structure_breaks, htf_trend, obs_htf2} ou None.
+    """
+    path = _CACHE_DAEMON_DIR / f"{instrument}.pkl"
+    if not path.exists():
+        return None
+    try:
+        with open(path, "rb") as f:
+            data = _pickle.load(f)
+    except Exception:
+        return None
+
+    # Daemon vivant ?
+    computed_at = data.get("computed_at")
+    if computed_at is None:
+        return None
+    age_sec = (_datetime.now(_timezone.utc) - computed_at).total_seconds()
+    if age_sec > _CACHE_MAX_AGE_SEC:
+        return None
+
+    # Meme bougie ?
+    if data.get("df_m1_last_ts") != df_m1_last_ts:
+        return None
+
+    return {
+        "obs": data["obs"],
+        "swings_ltf": data["swings_ltf"],
+        "fvgs_ltf": data["fvgs_ltf"],
+        "breakers_ltf": data["breakers_ltf"],
+        "obs_htf": data["obs_htf"],
+        "structure_breaks": data["structure_breaks"],
+        "htf_trend": data["htf_trend"],
+        "obs_htf2": data["obs_htf2"],
+    }
+
+
 def fetch_payload(
     mt5_exec: MT5Executor, instrument: str, balance: float | None, debug_diag: bool,
     evaluated_keys: set | None = None,
@@ -426,20 +484,53 @@ def compute_asset(payload: dict) -> dict:
         htf_swings = collect_htf_swings(htf_dfs, swing_strength=3)
 
         # Detection OB+MSS
+        # V12 (2026-05-23) : priorite cache externe > daemon > recalcul.
+        #   1. precomputed_cache dans le payload (utilise par backtest_tick pour
+        #      eviter le recalcul a chaque cycle)
+        #   2. cache_daemon via pickle (live VPS)
+        #   3. recalcul direct (fallback safe)
         _t = _time.time()
         sws = get_param(instrument, "swing_strength_m1", 2)
-        obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
-        cache = {
-            "swings_ltf": find_swings(df_m1, strength=sws),
-            "fvgs_ltf": detect_fvg(df_m1),
-            "breakers_ltf": detect_breakers(df_m1),
-            "obs_htf": detect_order_blocks(df_m15),
-        }
-        cache["structure_breaks"] = detect_structure_breaks(
-            df_m1, swings=cache["swings_ltf"], fvgs=cache["fvgs_ltf"]
-        )
-        cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
-        cache["obs_htf2"] = detect_order_blocks(df_h1)
+        _external_cache = payload.get("precomputed_cache")
+        _daemon_cache = None if _external_cache is not None else try_load_cache_from_daemon(instrument, df_m1.index[-1])
+        if _external_cache is not None:
+            obs = _external_cache["obs"]
+            cache = {
+                "swings_ltf": _external_cache["swings_ltf"],
+                "fvgs_ltf": _external_cache["fvgs_ltf"],
+                "breakers_ltf": _external_cache["breakers_ltf"],
+                "obs_htf": _external_cache["obs_htf"],
+                "structure_breaks": _external_cache["structure_breaks"],
+                "htf_trend": _external_cache["htf_trend"],
+                "obs_htf2": _external_cache["obs_htf2"],
+            }
+            cache_source = "external"
+        elif _daemon_cache is not None:
+            obs = _daemon_cache["obs"]
+            cache = {
+                "swings_ltf": _daemon_cache["swings_ltf"],
+                "fvgs_ltf": _daemon_cache["fvgs_ltf"],
+                "breakers_ltf": _daemon_cache["breakers_ltf"],
+                "obs_htf": _daemon_cache["obs_htf"],
+                "structure_breaks": _daemon_cache["structure_breaks"],
+                "htf_trend": _daemon_cache["htf_trend"],
+                "obs_htf2": _daemon_cache["obs_htf2"],
+            }
+            cache_source = "daemon"
+        else:
+            obs = detect_order_blocks(df_m1, swing_strength=sws)  # max_group_size defaut=5, ALIGNE OOS
+            cache = {
+                "swings_ltf": find_swings(df_m1, strength=sws),
+                "fvgs_ltf": detect_fvg(df_m1),
+                "breakers_ltf": detect_breakers(df_m1),
+                "obs_htf": detect_order_blocks(df_m15),
+            }
+            cache["structure_breaks"] = detect_structure_breaks(
+                df_m1, swings=cache["swings_ltf"], fvgs=cache["fvgs_ltf"]
+            )
+            cache["htf_trend"] = detect_trend(cache["swings_ltf"], lookback=6)
+            cache["obs_htf2"] = detect_order_blocks(df_h1)
+            cache_source = "compute"
         cache_build_s = _time.time() - _t
 
         mss_setups = detect_mss_setups(
@@ -539,7 +630,7 @@ def compute_asset(payload: dict) -> dict:
         if not obs_recent:
             _scan_total = _time.time() - _scan_start
             diag_log.append(
-                f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | cache_build={cache_build_s*1000:.0f}ms"
+                f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | cache_build={cache_build_s*1000:.0f}ms ({cache_source})"
             )
             return {
                 "instrument": instrument, "setups": [], "rejected_log": rejected_log,
@@ -679,7 +770,7 @@ def compute_asset(payload: dict) -> dict:
 
         _scan_total = _time.time() - _scan_start
         diag_log.append(
-            f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | cache_build={cache_build_s*1000:.0f}ms"
+            f"LATENCY {instrument}: total={_scan_total*1000:.0f}ms | cache_build={cache_build_s*1000:.0f}ms ({cache_source})"
         )
         return {
             "instrument": instrument, "setups": valid_setups, "rejected_log": rejected_log,

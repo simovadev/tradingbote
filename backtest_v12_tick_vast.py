@@ -197,7 +197,12 @@ def backtest_asset(args_tuple):
     # scan_start/end = fenetre de DETECTION (pour paralleliser). Les ticks
     # couvrent toute la journee donc les trades ne sont jamais coupes.
     # entry_mode : "limit" (defaut, retracement) ou "market" (entree immediate)
-    asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r = args_tuple
+    # Tuple : (asset, date, step, scan_start, scan_end, entry_mode, latency, commission, no_cache_optim?)
+    if len(args_tuple) == 9:
+        asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r, no_cache_optim = args_tuple
+    else:
+        asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r = args_tuple
+        no_cache_optim = False
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -212,6 +217,20 @@ def backtest_asset(args_tuple):
         from bot_v2.data_loader import load
         from bot_v2.live_runner_v2 import compute_asset, load_model
         from bot_v2.concepts.daily_bias import build_d1_from_h1
+        from bot_v2.concepts.order_block import detect_order_blocks as _dob
+        from bot_v2.concepts.liquidity import find_swings as _fs
+        from bot_v2.concepts.fvg import detect_fvg as _dfvg
+        from bot_v2.concepts.breaker import detect_breakers as _dbrk
+        from bot_v2.concepts.structure import detect_structure_breaks as _dsb, detect_trend as _dtr
+        from bot_v2.config import get_param as _gp
+        from bot_v2.cache_filter import (
+            filter_cache_for_cut as _filter_cache,
+            shift_obs as _shift_obs,
+            shift_swings as _shift_swings,
+            shift_fvgs as _shift_fvgs,
+            shift_breakers as _shift_breakers,
+            shift_structure_breaks as _shift_sb,
+        )
 
         day = _pd.Timestamp(date_str, tz="UTC")
         # Fenetre de detection (sous-periode pour parallelisme)
@@ -245,6 +264,27 @@ def backtest_asset(args_tuple):
         if loaded is None:
             return {"ok": False, "asset": asset, "error": "pas de modele"}
 
+        # === OPTIM 2026-05-23 : pre-calcul du cache complet UNE SEULE FOIS ===
+        # Au lieu de recalculer obs/swings/fvgs/breakers/sb 288 fois (1/cycle),
+        # on les calcule UNE fois sur df_m1 complet, puis on filtre par cycle.
+        # Equivalence stricte prouvee par test_cache_filter_equivalence.py.
+        # Si no_cache_optim=True : on n'utilise pas l'optim (comportement original).
+        cache_full = None
+        if not no_cache_optim:
+            _sws = _gp(asset, "swing_strength_m1", 2)
+            _all_obs = _dob(df_m1, swing_strength=_sws)
+            _all_swings = _fs(df_m1, strength=_sws)
+            _all_fvgs = _dfvg(df_m1)
+            _all_breakers = _dbrk(df_m1)
+            _all_sb = _dsb(df_m1, swings=_all_swings, fvgs=_all_fvgs)
+            _all_obs_m15 = _dob(df_m15)
+            _all_obs_h1 = _dob(df_h1)
+            cache_full = {
+                "obs": _all_obs, "swings_ltf": _all_swings, "fvgs_ltf": _all_fvgs,
+                "breakers_ltf": _all_breakers, "structure_breaks": _all_sb,
+                "obs_htf": _all_obs_m15, "obs_htf2": _all_obs_h1, "htf_trend": None,
+            }
+
         # Scan boucle (detection M1)
         active = []
         evaluated = set()
@@ -253,19 +293,47 @@ def backtest_asset(args_tuple):
         while cur <= end:
             cut = cur - _pd.Timedelta(minutes=1)
             ie = df_m1.index.searchsorted(cut, side="right")
-            sub_m1 = df_m1.iloc[max(0, ie - 88000):ie]
+            sub_start = max(0, ie - 88000)
+            sub_m1 = df_m1.iloc[sub_start:ie]
             if len(sub_m1) < 200:
                 cur += _pd.Timedelta(minutes=step); continue
             i15 = df_m15.index.searchsorted(cut, side="right")
+            i15_start = max(0, i15 - 11000)
             i1 = df_h1.index.searchsorted(cut, side="right")
+            i1_start = max(0, i1 - 2800)
             id1 = df_d1.index.searchsorted(cut, side="right")
+
+            _precomputed = None
+            if cache_full is not None:
+                # Filtre + shift du cache pour ce cycle.
+                # 1. Filtre dans le referentiel "df_m1 complet" (cut_iloc=ie).
+                _cache_at_cut = _filter_cache(
+                    cache_full,
+                    cut_iloc_m1=ie,
+                    cut_iloc_m15=i15,
+                    cut_iloc_h1=i1,
+                    df_m1_cut=df_m1.iloc[:ie],
+                )
+                # 2. Shift dans le referentiel "sub_m1" (offsets sub_start, i15_start, i1_start).
+                _precomputed = {
+                    "obs": _shift_obs(_cache_at_cut["obs"], sub_start),
+                    "swings_ltf": _shift_swings(_cache_at_cut["swings_ltf"], sub_start),
+                    "fvgs_ltf": _shift_fvgs(_cache_at_cut["fvgs_ltf"], sub_start),
+                    "breakers_ltf": _shift_breakers(_cache_at_cut["breakers_ltf"], sub_start),
+                    "structure_breaks": _shift_sb(_cache_at_cut["structure_breaks"], sub_start),
+                    "obs_htf": _shift_obs(_cache_at_cut["obs_htf"], i15_start),
+                    "obs_htf2": _shift_obs(_cache_at_cut["obs_htf2"], i1_start),
+                    "htf_trend": _cache_at_cut["htf_trend"],
+                }
+
             payload = {
                 "instrument": asset, "df_m1": sub_m1,
-                "df_m15": df_m15.iloc[max(0, i15 - 11000):i15],
-                "df_h1": df_h1.iloc[max(0, i1 - 2800):i1],
+                "df_m15": df_m15.iloc[i15_start:i15],
+                "df_h1": df_h1.iloc[i1_start:i1],
                 "df_h4": (df_h4.iloc[:df_h4.index.searchsorted(cut, side="right")][-500:] if df_h4 is not None else None),
                 "df_d1": df_d1.iloc[max(0, id1 - 120):id1],
                 "correlated_dfs": {}, "balance": INITIAL_BALANCE, "debug_diag": False,
+                "precomputed_cache": _precomputed,
             }
             try:
                 res = compute_asset(payload)
@@ -326,6 +394,8 @@ def main():
                    help="Latence en s entre decision et execution (realisme VPS/MT5). Default 0.")
     p.add_argument("--commission_r", type=float, default=0.0,
                    help="Commission par trade en R (ex: 0.07 = 7%% du risque). Default 0.")
+    p.add_argument("--no_cache_optim", action="store_true",
+                   help="Desactive le cache_filter (recalcul a chaque cycle, comme avant). Utile pour valider l'equivalence.")
     args = p.parse_args()
 
     day = pd.Timestamp(args.date, tz="UTC")
@@ -353,7 +423,7 @@ def main():
     for a in args.assets:
         for (ws, we) in windows:
             tasks.append((a, args.date, args.step, ws, we, args.entry_mode,
-                          args.latency_s, args.commission_r))
+                          args.latency_s, args.commission_r, args.no_cache_optim))
     results = []
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
