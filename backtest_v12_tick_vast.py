@@ -353,12 +353,17 @@ def backtest_asset(args_tuple):
             }
 
         # Scan boucle (detection M1)
+        # FIX 2026-05-23 : aligner le scan sur le LIVE qui voit la bougie qui vient
+        # de fermer (a xx:00:03 le live voit la bougie xx-1:00 fermee).
+        # Avant : cut = cur - 1min -> on voyait jusqu'a cur-2:00 (2 min de retard)
+        # Maintenant : cut = cur -> on voit la bougie d'index cur (qui vient de
+        # fermer en simulation = comportement live identique).
         active = []
         evaluated = set()
         cur = start
         n_setups = 0
         while cur <= end:
-            cut = cur - _pd.Timedelta(minutes=1)
+            cut = cur
             ie = df_m1.index.searchsorted(cut, side="right")
             sub_start = max(0, ie - 88000)
             sub_m1 = df_m1.iloc[sub_start:ie]
@@ -411,6 +416,14 @@ def backtest_asset(args_tuple):
                 key = (str(ob_ts), ob.direction)
                 if key in evaluated:
                     continue
+                # FIX 2026-05-23 (Bug #1) : Skip les OB valides AVANT le debut de
+                # notre fenetre de scan. Sinon les workers detectent retroactivement
+                # les OB de la fenetre precedente et les placent au debut de la
+                # leur (= retard 30 min artificiel). Le live n'a pas ce probleme
+                # car un seul scanner continu.
+                if _pd.Timestamp(ob_ts) < start:
+                    evaluated.add(key)  # marque comme deja vu pour ne pas re-essayer
+                    continue
                 if (cur - ob_ts).total_seconds() / 60 > CAP_AGE_OB_MIN:
                     continue
                 # FIX #3 : Filtre heures pourries
@@ -439,9 +452,13 @@ def backtest_asset(args_tuple):
                                     tp_use = t2.entry_price - sl_dist_min * t2.rr
                     except Exception:
                         pass
+                # FIX 2026-05-23 (Bug #2) : placed_ts = ob_ts + 3s (simule sync close M1
+                # comme en live). La latence MT5 (4s) sera ajoutee par simulate_*_on_ticks
+                # via --latency_s 4 => total = 7s apres close = identique au live.
+                placed_ts_live_equiv = _pd.Timestamp(ob_ts) + _pd.Timedelta(seconds=3)
                 active.append(TradeRec(
                     instrument=asset, direction=ob.direction, ob_ts=str(ob_ts),
-                    placed_ts=str(cur), ml=proba,
+                    placed_ts=str(placed_ts_live_equiv), ml=proba,
                     entry=t2.entry_price, sl=sl_use, tp=tp_use, rr=rr_use))
                 evaluated.add(key)
                 n_setups += 1
