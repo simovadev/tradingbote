@@ -1982,12 +1982,18 @@ def run_live(test_dry_run: bool = False):
     log.info(f"Buffers initialises : {len(DATA_BUFFERS)} actifs")
     log.info("=" * 70)
 
-    # === V5.7 (2026-05-21) : ProcessPool 4 workers pour scan parallele ===
+    # === V5.7 (2026-05-21) : ProcessPool workers pour scan parallele ===
     # Cree UNE fois (workers persistents) -> _models_cache reste chaud entre
     # cycles. Ferme dans le finally a la fin.
+    # V12 (2026-05-23) : nb de workers configurable via env BOT_WORKERS.
+    # Defaut = 8 : force le scheduler a paralleliser meme sur 4 coeurs (les
+    # workers passent ~30% en I/O pickle/log -> overlap permet de gagner du
+    # temps malgre la contention). Sur VPS Contabo 4 coeurs : passe le cycle
+    # de 17s a ~10-12s en pleine semaine (mesure 2026-05-23).
     from concurrent.futures import ProcessPoolExecutor
-    POOL = ProcessPoolExecutor(max_workers=4)
-    log.info("ProcessPool : 4 workers persistents crees")
+    _n_workers = int(os.environ.get("BOT_WORKERS", "8"))
+    POOL = ProcessPoolExecutor(max_workers=_n_workers)
+    log.info(f"ProcessPool : {_n_workers} workers persistents crees (env BOT_WORKERS={_n_workers})")
     log.info("=" * 70)
 
     # === BOOT DIAGNOSTICS : audit complet avant de demarrer la boucle ===
