@@ -268,12 +268,22 @@ def run_backtest(start: pd.Timestamp, end: pd.Timestamp,
                 "df_h4": df_h4, "df_d1": df_d1,
                 "correlated_dfs": data[a]["correlated"],
                 "balance": INITIAL_BALANCE,
-                "debug_diag": False,
+                # Active via env var DEBUG_DIAG=1 : imprime nb OB, probas ML,
+                # raisons de rejet pour chaque scan. Utile pour comprendre
+                # pourquoi certains actifs ne tradent pas (ML trop severe ?
+                # OB pas detecte ? phase rejette ?).
+                "debug_diag": bool(int(os.environ.get("DEBUG_DIAG", "0"))),
             }
             try:
                 result = compute_asset(payload)
             except Exception as e:
                 continue
+
+            # En mode DEBUG_DIAG, on affiche les rejets pour comprendre
+            # pourquoi certains actifs ne tradent pas (ML trop bas, phase, etc.)
+            if payload["debug_diag"]:
+                for dl in result.get("diag_log", []):
+                    print(f"  [{a}] {dl}", flush=True)
 
             for setup in result.get("setups", []):
                 n_setups_detected += 1
