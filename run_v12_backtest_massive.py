@@ -105,12 +105,21 @@ def backtest_task(args_tuple):
     }
 
 
-def split_period(start: pd.Timestamp, end: pd.Timestamp, period_days: int):
-    """Decoupe [start, end] en sous-periodes de period_days jours."""
+def split_period(start: pd.Timestamp, end: pd.Timestamp,
+                 period_days: int = 0, period_hours: int = 0):
+    """Decoupe [start, end] en sous-periodes.
+
+    Si period_hours > 0 : decoupe en heures (granularite fine pour paralleliser).
+    Sinon : decoupe en period_days jours.
+    """
+    if period_hours > 0:
+        step = pd.Timedelta(hours=period_hours)
+    else:
+        step = pd.Timedelta(days=period_days)
     periods = []
     cur = start
     while cur < end:
-        nxt = min(cur + pd.Timedelta(days=period_days), end)
+        nxt = min(cur + step, end)
         periods.append((cur, nxt))
         cur = nxt
     return periods
@@ -123,7 +132,9 @@ def main():
     p.add_argument("--step", type=int, default=5)
     p.add_argument("--assets", nargs="+", default=None)
     p.add_argument("--period_days", type=int, default=4,
-                   help="Decoupage sous-periodes (default 4 jours)")
+                   help="Decoupage sous-periodes (default 4 jours, ignore si --period_hours)")
+    p.add_argument("--period_hours", type=int, default=0,
+                   help="Decoupage en heures (granularite fine pour paralleliser)")
     p.add_argument("--workers", type=int, default=96)
     args = p.parse_args()
 
@@ -133,7 +144,7 @@ def main():
         end = end + pd.Timedelta(hours=23, minutes=59)
 
     assets = args.assets or LIVE_ASSETS
-    periods = split_period(start, end, args.period_days)
+    periods = split_period(start, end, args.period_days, args.period_hours)
     print(f"=== BACKTEST V12 MASSIVE PARALLEL ===", flush=True)
     print(f"Periode globale : {start} -> {end}", flush=True)
     print(f"Sous-periodes   : {len(periods)} x {args.period_days} jours", flush=True)
