@@ -31,7 +31,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, "c:/Users/Shadow/TradingBot")
+# Chemin portable : racine = dossier du script (marche sur PC local et VPS)
+_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(_ROOT))
 
 import pandas as pd
 
@@ -54,7 +56,7 @@ N_BARS_M1 = 88000
 N_BARS_M15 = 11000
 N_BARS_H1 = 2800
 
-CACHE_DIR = Path("c:/Users/Shadow/TradingBot/data_cache")
+CACHE_DIR = _ROOT / "data_cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(
