@@ -62,7 +62,8 @@ class TradeRec:
     pnl_r: float = 0.0
 
 
-def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask, commission_r=0.0):
+def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask, commission_r=0.0,
+                      apply_breakeven_at_R=None):
     placed = pd.Timestamp(rec.placed_ts).value
     expire = placed + EXPIRE_PENDING_MIN * 60 * 1_000_000_000
     n = len(tick_times)
@@ -109,17 +110,37 @@ def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask, commission_r=0.0):
     if fill_idx is None:
         rec.outcome = "NO_FILL"; return
     rec.fill_ts = str(pd.Timestamp(tick_times[fill_idx], tz="UTC"))
+    # FIX #2 : Breakeven a +X*R (SL move a entry quand MFE atteint X*R)
+    sl_active = rec.sl
+    risk = abs(rec.entry - rec.sl)
+    be_threshold = (apply_breakeven_at_R * risk) if apply_breakeven_at_R else None
+    be_triggered = False
     for i in range(fill_idx + 1, n):
+        # MFE tracking pour BE
+        if be_threshold and not be_triggered:
+            if rec.direction == "bullish":
+                move_favor = tick_bid[i] - rec.entry
+            else:
+                move_favor = rec.entry - tick_ask[i]
+            if move_favor >= be_threshold:
+                sl_active = rec.entry  # SL deplace a entry
+                be_triggered = True
         if rec.direction == "bullish":
-            if tick_bid[i] <= rec.sl:
-                rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
+            if tick_bid[i] <= sl_active:
+                if be_triggered and sl_active == rec.entry:
+                    rec.outcome = "BE"; rec.pnl_r = 0.0 - commission_r
+                else:
+                    rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
             if tick_bid[i] >= rec.tp:
                 rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
         else:
-            if tick_ask[i] >= rec.sl:
-                rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
+            if tick_ask[i] >= sl_active:
+                if be_triggered and sl_active == rec.entry:
+                    rec.outcome = "BE"; rec.pnl_r = 0.0 - commission_r
+                else:
+                    rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
                 rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
             if tick_ask[i] <= rec.tp:
                 rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
@@ -197,12 +218,21 @@ def backtest_asset(args_tuple):
     # scan_start/end = fenetre de DETECTION (pour paralleliser). Les ticks
     # couvrent toute la journee donc les trades ne sont jamais coupes.
     # entry_mode : "limit" (defaut, retracement) ou "market" (entree immediate)
-    # Tuple : (asset, date, step, scan_start, scan_end, entry_mode, latency, commission, no_cache_optim?)
-    if len(args_tuple) == 9:
+    # Tuple : (asset, date, step, scan_start, scan_end, entry_mode, latency, commission, no_cache_optim, opts?)
+    if len(args_tuple) == 10:
+        asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r, no_cache_optim, opts = args_tuple
+    elif len(args_tuple) == 9:
         asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r, no_cache_optim = args_tuple
+        opts = {}
     else:
         asset, date_str, step, scan_start_str, scan_end_str, entry_mode, latency_s, commission_r = args_tuple
         no_cache_optim = False
+        opts = {}
+    # Options (FIXES)
+    apply_sl_min_atr = opts.get("apply_sl_min_atr", False)
+    sl_min_atr_factor = opts.get("sl_min_atr_factor", 0.5)
+    block_hours = set(opts.get("block_hours", []))
+    apply_breakeven_at_R = opts.get("apply_breakeven_at_R", None)
     try:
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -346,11 +376,36 @@ def backtest_asset(args_tuple):
                     continue
                 if (cur - ob_ts).total_seconds() / 60 > CAP_AGE_OB_MIN:
                     continue
+                # FIX #3 : Filtre heures pourries
+                if cur.hour in block_hours:
+                    evaluated.add(key)
+                    continue
                 t2 = s["r"].trade_setup
+                # FIX #1 : SL minimum base sur ATR M5
+                sl_use = t2.stop_loss
+                tp_use = t2.take_profit
+                rr_use = t2.rr
+                if apply_sl_min_atr:
+                    # ATR M5 simple : 20 dernieres bougies M5 du sub_m1
+                    try:
+                        m5 = sub_m1[-100:].resample("5min").agg({"high":"max","low":"min"}).dropna()
+                        if len(m5) >= 5:
+                            atr_m5 = float((m5["high"].tail(20) - m5["low"].tail(20)).mean())
+                            sl_dist_natural = abs(t2.entry_price - t2.stop_loss)
+                            sl_dist_min = sl_min_atr_factor * atr_m5
+                            if sl_dist_natural < sl_dist_min:
+                                if ob.direction == "bullish":
+                                    sl_use = t2.entry_price - sl_dist_min
+                                    tp_use = t2.entry_price + sl_dist_min * t2.rr
+                                else:
+                                    sl_use = t2.entry_price + sl_dist_min
+                                    tp_use = t2.entry_price - sl_dist_min * t2.rr
+                    except Exception:
+                        pass
                 active.append(TradeRec(
                     instrument=asset, direction=ob.direction, ob_ts=str(ob_ts),
                     placed_ts=str(cur), ml=proba,
-                    entry=t2.entry_price, sl=t2.stop_loss, tp=t2.take_profit, rr=t2.rr))
+                    entry=t2.entry_price, sl=sl_use, tp=tp_use, rr=rr_use))
                 evaluated.add(key)
                 n_setups += 1
             cur += _pd.Timedelta(minutes=step)
@@ -361,9 +416,10 @@ def backtest_asset(args_tuple):
                                          latency_s=latency_s, commission_r=commission_r)
             else:
                 simulate_on_ticks(rec, tick_times, tick_bid, tick_ask,
-                                  commission_r=commission_r)
+                                  commission_r=commission_r,
+                                  apply_breakeven_at_R=apply_breakeven_at_R)
 
-        closed = [t for t in active if t.outcome in ("WIN", "LOSS")]
+        closed = [t for t in active if t.outcome in ("WIN", "LOSS", "BE")]
         wr = (sum(1 for t in closed if t.outcome == "WIN") / len(closed) * 100) if closed else 0
         return {
             "ok": True, "asset": asset, "n_setups": n_setups,
@@ -396,6 +452,13 @@ def main():
                    help="Commission par trade en R (ex: 0.07 = 7%% du risque). Default 0.")
     p.add_argument("--no_cache_optim", action="store_true",
                    help="Desactive le cache_filter (recalcul a chaque cycle, comme avant). Utile pour valider l'equivalence.")
+    # === FIXES ===
+    p.add_argument("--sl_min_atr", action="store_true", help="FIX #1 : SL min = factor x ATR M5")
+    p.add_argument("--sl_min_atr_factor", type=float, default=0.5)
+    p.add_argument("--breakeven_at_R", type=float, default=None, help="FIX #2 : BE quand MFE >= X*R")
+    p.add_argument("--block_hours", nargs="+", type=int, default=[], help="FIX #3 : heures UTC bloquees")
+    p.add_argument("--dates", nargs="+", default=None,
+                   help="Plusieurs dates au lieu de --date (ex: --dates 2026-05-12 2026-05-13)")
     args = p.parse_args()
 
     day = pd.Timestamp(args.date, tz="UTC")
@@ -419,11 +482,36 @@ def main():
     print(f"Commission/R  : {args.commission_r:.3f} (= {args.commission_r*100:.1f}% du risque par trade)", flush=True)
     print()
 
+    # Options pour les fixes
+    opts_fixes = {
+        "apply_sl_min_atr": args.sl_min_atr,
+        "sl_min_atr_factor": args.sl_min_atr_factor,
+        "block_hours": args.block_hours,
+        "apply_breakeven_at_R": args.breakeven_at_R,
+    }
+    print(f"--- FIXES ---")
+    print(f"  sl_min_atr      : {args.sl_min_atr} (factor={args.sl_min_atr_factor})  (FIX #1)")
+    print(f"  breakeven_at_R  : {args.breakeven_at_R}  (FIX #2)")
+    print(f"  block_hours     : {args.block_hours}  (FIX #3)")
+    print(f"  entry_mode      : {args.entry_mode}  (FIX #4)")
+    print(f"  step (FIX #5)   : {args.step} min")
+    print()
+
+    # Support multi-dates
+    dates_to_run = args.dates if args.dates else [args.date]
+
     tasks = []
-    for a in args.assets:
-        for (ws, we) in windows:
-            tasks.append((a, args.date, args.step, ws, we, args.entry_mode,
-                          args.latency_s, args.commission_r, args.no_cache_optim))
+    for d in dates_to_run:
+        for a in args.assets:
+            for (ws, we) in windows:
+                # Re-decoupage windows pour la date d (les windows sont definies pour args.date)
+                if d != args.date:
+                    ws_d = ws.replace(args.date, d)
+                    we_d = we.replace(args.date, d)
+                else:
+                    ws_d, we_d = ws, we
+                tasks.append((a, d, args.step, ws_d, we_d, args.entry_mode,
+                              args.latency_s, args.commission_r, args.no_cache_optim, opts_fixes))
     results = []
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
@@ -460,7 +548,7 @@ def main():
         dedup.append(t)
     all_tr = dedup
 
-    closed = [t for t in all_tr if t["outcome"] in ("WIN", "LOSS")]
+    closed = [t for t in all_tr if t["outcome"] in ("WIN", "LOSS", "BE")]
     tot_closed = len(closed)
     tot_win = sum(1 for t in closed if t["outcome"] == "WIN")
     tot_pnl = sum(t["pnl_r"] for t in closed)
