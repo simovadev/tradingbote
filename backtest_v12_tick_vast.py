@@ -64,88 +64,125 @@ class TradeRec:
 
 def simulate_on_ticks(rec, tick_times, tick_bid, tick_ask, commission_r=0.0,
                       apply_breakeven_at_R=None):
+    """Version vectorisee numpy : ~5x plus rapide que la version boucle Python.
+
+    Strictement equivalente : meme INVALID_PRICE, NO_FILL, BE, WIN, LOSS, OPEN.
+    Utilise searchsorted + argmax pour eviter les boucles for sur 100k+ ticks.
+    """
+    import numpy as np
     placed = pd.Timestamp(rec.placed_ts).value
     expire = placed + EXPIRE_PENDING_MIN * 60 * 1_000_000_000
     n = len(tick_times)
 
-    # --- Reproduit la VRAIE logique d'un ordre LIMIT MT5 ---
-    # SELL LIMIT : doit etre place AU-DESSUS du prix courant, se remplit quand
-    #   le prix REMONTE toucher entry. Si au placement le prix est deja >= entry
-    #   -> MT5 rejette "Invalid price" (le pending n'aurait pas existe).
-    # BUY LIMIT : doit etre place EN DESSOUS, se remplit quand le prix DESCEND.
-    # On trouve le 1er tick apres placement = prix de reference.
-    ref_idx = None
-    for i in range(n):
-        if tick_times[i] > placed:
-            ref_idx = i
-            break
-    if ref_idx is None:
+    # 1. ref_idx = 1er tick avec t > placed (searchsorted = O(log n))
+    ref_idx = int(np.searchsorted(tick_times, placed, side="right"))
+    if ref_idx >= n:
         rec.outcome = "NO_FILL"; return
 
-    # Prix de reference au placement
+    # 2. Check INVALID_PRICE au ref tick (prix deja du mauvais cote)
     if rec.direction == "bullish":
-        ref_price = tick_ask[ref_idx]   # on achetera au ask
-        # BUY LIMIT valide seulement si prix de ref AU-DESSUS de l'entry
-        # (sinon le prix est deja en dessous -> fill instantane = ordre invalide)
-        if ref_price <= rec.entry:
+        if tick_ask[ref_idx] <= rec.entry:
             rec.outcome = "INVALID_PRICE"; return
     else:
-        ref_price = tick_bid[ref_idx]   # on vendra au bid
-        # SELL LIMIT valide seulement si prix de ref EN DESSOUS de l'entry
-        if ref_price >= rec.entry:
+        if tick_bid[ref_idx] >= rec.entry:
             rec.outcome = "INVALID_PRICE"; return
 
-    # Cherche le fill : le prix doit REVENIR toucher entry (vrai retracement)
-    fill_idx = None
-    for i in range(ref_idx, n):
-        t = tick_times[i]
-        if t > expire:
-            rec.outcome = "NO_FILL"; return
-        if rec.direction == "bullish":
-            if tick_ask[i] <= rec.entry:
-                fill_idx = i; break
-        else:
-            if tick_bid[i] >= rec.entry:
-                fill_idx = i; break
-    if fill_idx is None:
+    # 3. Limite de recherche = avant expire
+    expire_idx = int(np.searchsorted(tick_times, expire, side="right"))
+    expire_idx = min(expire_idx, n)
+    if expire_idx <= ref_idx:
         rec.outcome = "NO_FILL"; return
+
+    # 4. Cherche le fill via argmax sur condition vectorisee
+    if rec.direction == "bullish":
+        # Fill quand ask <= entry
+        hit_fill = tick_ask[ref_idx:expire_idx] <= rec.entry
+    else:
+        # Fill quand bid >= entry
+        hit_fill = tick_bid[ref_idx:expire_idx] >= rec.entry
+    if not hit_fill.any():
+        rec.outcome = "NO_FILL"; return
+    fill_idx = ref_idx + int(hit_fill.argmax())  # 1er True
+
     rec.fill_ts = str(pd.Timestamp(tick_times[fill_idx], tz="UTC"))
-    # FIX #2 : Breakeven a +X*R (SL move a entry quand MFE atteint X*R)
-    sl_active = rec.sl
+
+    # 5. Apres fill : chercher exit (SL, TP, ou BE)
     risk = abs(rec.entry - rec.sl)
     be_threshold = (apply_breakeven_at_R * risk) if apply_breakeven_at_R else None
-    be_triggered = False
-    for i in range(fill_idx + 1, n):
-        # MFE tracking pour BE
-        if be_threshold and not be_triggered:
-            if rec.direction == "bullish":
-                move_favor = tick_bid[i] - rec.entry
+
+    # Sous-fenetre post-fill (jusqu'a fin du tick array)
+    post_bid = tick_bid[fill_idx + 1:]
+    post_ask = tick_ask[fill_idx + 1:]
+    post_times = tick_times[fill_idx + 1:]
+    n_post = len(post_bid)
+    if n_post == 0:
+        rec.outcome = "OPEN"; return
+
+    if rec.direction == "bullish":
+        # Position LONG : on suit le bid pour sortie
+        # MFE = max(bid - entry)
+        # SL touche : bid <= sl_active
+        # TP touche : bid >= tp
+        hit_tp = post_bid >= rec.tp
+        hit_sl_orig = post_bid <= rec.sl
+
+        # Si BE active : on doit gerer le SL dynamique
+        if be_threshold is not None:
+            # 1er tick ou move_favor >= be_threshold (= MFE atteint)
+            move_favor = post_bid - rec.entry
+            hit_be = move_favor >= be_threshold
+            if hit_be.any():
+                be_idx = int(hit_be.argmax())
+                # Avant be_idx : SL = rec.sl
+                # Apres be_idx : SL = rec.entry (= breakeven)
+                hit_sl_be = post_bid <= rec.entry
+                # On masque hit_sl_be avant be_idx (BE pas encore actif)
+                mask_after_be = np.arange(n_post) > be_idx
+                hit_sl_combined = (hit_sl_orig & ~mask_after_be) | (hit_sl_be & mask_after_be)
             else:
-                move_favor = rec.entry - tick_ask[i]
-            if move_favor >= be_threshold:
-                sl_active = rec.entry  # SL deplace a entry
-                be_triggered = True
-        if rec.direction == "bullish":
-            if tick_bid[i] <= sl_active:
-                if be_triggered and sl_active == rec.entry:
-                    rec.outcome = "BE"; rec.pnl_r = 0.0 - commission_r
-                else:
-                    rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
-                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
-            if tick_bid[i] >= rec.tp:
-                rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
-                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
+                hit_sl_combined = hit_sl_orig
+                be_idx = -1
         else:
-            if tick_ask[i] >= sl_active:
-                if be_triggered and sl_active == rec.entry:
-                    rec.outcome = "BE"; rec.pnl_r = 0.0 - commission_r
-                else:
-                    rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
-                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
-            if tick_ask[i] <= rec.tp:
-                rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
-                rec.exit_ts = str(pd.Timestamp(tick_times[i], tz="UTC")); return
-    rec.outcome = "OPEN"
+            hit_sl_combined = hit_sl_orig
+            be_idx = -1
+    else:
+        # Position SHORT : on suit le ask
+        hit_tp = post_ask <= rec.tp
+        hit_sl_orig = post_ask >= rec.sl
+
+        if be_threshold is not None:
+            move_favor = rec.entry - post_ask
+            hit_be = move_favor >= be_threshold
+            if hit_be.any():
+                be_idx = int(hit_be.argmax())
+                hit_sl_be = post_ask >= rec.entry
+                mask_after_be = np.arange(n_post) > be_idx
+                hit_sl_combined = (hit_sl_orig & ~mask_after_be) | (hit_sl_be & mask_after_be)
+            else:
+                hit_sl_combined = hit_sl_orig
+                be_idx = -1
+        else:
+            hit_sl_combined = hit_sl_orig
+            be_idx = -1
+
+    # 1er TP et 1er SL (combined avec BE)
+    tp_first = int(hit_tp.argmax()) if hit_tp.any() else n_post + 1
+    sl_first = int(hit_sl_combined.argmax()) if hit_sl_combined.any() else n_post + 1
+
+    if tp_first == n_post + 1 and sl_first == n_post + 1:
+        rec.outcome = "OPEN"; return
+
+    if tp_first < sl_first:
+        rec.outcome = "WIN"; rec.pnl_r = rec.rr - commission_r
+        rec.exit_ts = str(pd.Timestamp(post_times[tp_first], tz="UTC")); return
+    else:
+        # SL ou BE ?
+        if be_idx >= 0 and sl_first > be_idx:
+            # SL touche APRES be_idx -> BE
+            rec.outcome = "BE"; rec.pnl_r = 0.0 - commission_r
+        else:
+            rec.outcome = "LOSS"; rec.pnl_r = -1.0 - commission_r
+        rec.exit_ts = str(pd.Timestamp(post_times[sl_first], tz="UTC")); return
 
 
 def simulate_market_on_ticks(rec, tick_times, tick_bid, tick_ask,
