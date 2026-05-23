@@ -488,12 +488,18 @@ def backtest_one(args_tuple):
                 df_m1, swings=cache_full["swings_ltf"], fvgs=cache_full["fvgs_ltf"]
             )
 
-        # === Boucle de scan (5 min step) ===
+        # === Boucle de scan (step minutes) ===
         all_rows = []
         evaluated = set()
         cur = start
         step = pd.Timedelta(minutes=step_min)
+        total_cycles = int((end - start).total_seconds() / 60 / step_min)
+        log_every = max(50, total_cycles // 5)  # 5 logs intermediaires par task
+        cycle_idx = 0
+        n_setups_so_far = 0
+        _t_task_start = time.time()
         while cur <= end:
+            cycle_idx += 1
             cut = cur - pd.Timedelta(minutes=1)
             ie = df_m1.index.searchsorted(cut, side="right")
             sub_start = max(0, ie - 88000)
@@ -628,7 +634,16 @@ def backtest_one(args_tuple):
                 )
                 all_rows.append(row)
                 evaluated.add(key)
+                n_setups_so_far += 1
             cur += step
+
+            # Log progression intra-task toutes les N cycles
+            if cycle_idx % log_every == 0:
+                pct = cycle_idx / total_cycles * 100
+                dt = time.time() - _t_task_start
+                eta = dt / cycle_idx * (total_cycles - cycle_idx) if cycle_idx > 0 else 0
+                print(f"  [{asset} {date_str}] {pct:.0f}%  cycle={cycle_idx}/{total_cycles}  "
+                      f"setups={n_setups_so_far}  elapsed={dt:.0f}s  ETA={eta:.0f}s", flush=True)
 
         return {"ok": True, "asset": asset, "date": date_str, "rows": all_rows}
     except Exception as e:
