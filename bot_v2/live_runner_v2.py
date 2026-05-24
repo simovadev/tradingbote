@@ -2057,6 +2057,15 @@ def run_live(test_dry_run: bool = False):
     log.info(f"Buffers initialises : {len(DATA_BUFFERS)} actifs")
     log.info("=" * 70)
 
+    # V14 (2026-05-24) : si des modeles V14 existent, force OB_VALIDATION_MODE=mitigation
+    # AVANT la creation du ProcessPool. Sinon les workers heritent du defaut "bos"
+    # et detectent les OB en mode BOS au lieu de mitigation -> mismatch ML V14
+    # entraine sur dataset mitigation. Symptome : bars_latency 10-20 au lieu de 0-2.
+    if any(BOT_V2_DIR.glob("ml_model_*_vantage_v14.pkl")):
+        if os.environ.get("OB_VALIDATION_MODE") != "mitigation":
+            os.environ["OB_VALIDATION_MODE"] = "mitigation"
+            log.info("V14 detecte au boot -> OB_VALIDATION_MODE=mitigation (avant spawn workers)")
+
     # === V5.7 (2026-05-21) : ProcessPool workers pour scan parallele ===
     # Cree UNE fois (workers persistents) -> _models_cache reste chaud entre
     # cycles. Ferme dans le finally a la fin.
