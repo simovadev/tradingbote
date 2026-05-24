@@ -2223,6 +2223,7 @@ def run_live(test_dry_run: bool = False):
                         latencies=_cycle_latencies,
                         last_bar_ts=_last_bar_ts,
                     )
+                    log.info(f"DEBUG push : cycle_rejected_batch={len(_cycle_rejected_batch)} candles_assets={list(_cycle_candles_by_asset.keys())}")
                     if _cycle_rejected_batch:
                         # Bougies des actifs concernes par au moins un rejet
                         try:
@@ -2232,10 +2233,12 @@ def run_live(test_dry_run: bool = False):
                                 for a in _rejected_assets
                                 if a in _cycle_candles_by_asset
                             }
+                            log.info(f"DEBUG push : about to push {len(_cycle_rejected_batch)} rejets + {len(_candles_for_batch)} candles_assets")
                             PUSHER.push_rejected_batch(
                                 _cycle_rejected_batch,
                                 candles_by_asset=_candles_for_batch if _candles_for_batch else None,
                             )
+                            log.info(f"DEBUG push : push_rejected_batch returned OK")
                         except Exception as _re:
                             log.exception(f"push_rejected_batch FAIL : {_re}")
                 except Exception as _pe:
