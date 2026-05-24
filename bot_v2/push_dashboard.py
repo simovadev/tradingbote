@@ -27,6 +27,13 @@ except ImportError:
 
 
 log = logging.getLogger("push_dashboard")
+# Hack : attache au logger "live" pour que ses messages soient logges dans live.log.
+# Sinon les warnings du worker thread (timeout, HTTP errors) sont invisibles.
+_parent_logger = logging.getLogger("live")
+if _parent_logger.handlers and not log.handlers:
+    for h in _parent_logger.handlers:
+        log.addHandler(h)
+log.setLevel(logging.INFO)
 
 
 class DashboardPusher:
