@@ -15,12 +15,21 @@ Stop Loss : MECHE (decision user 2026-05-15).
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Literal
 
 import pandas as pd
 
 from bot_v2.concepts.liquidity import Sweep, Swing, find_sweeps, find_swings
+
+# V14 (2026-05-25) : mode global via env var. Si OB_VALIDATION_MODE=mitigation,
+# tous les appels a detect_order_blocks utilisent ce mode (sauf override explicite).
+# Permet de switcher V13 (BOS) <-> V14 (mitigation) sans toucher tous les call sites.
+# Lu a chaque appel (pas au module import) pour que load_model V14 puisse l'activer
+# a runtime.
+def _get_global_validation_mode() -> str:
+    return os.environ.get("OB_VALIDATION_MODE", "bos")
 
 
 OBDirection = Literal["bullish", "bearish"]
@@ -68,6 +77,7 @@ def detect_order_blocks(
     min_group_size: int = 1,
     max_bars_after_sweep: int = 30,
     min_sweep_depth_atr: float = 0.0,
+    validation_mode: str = "bos",
 ) -> list[OrderBlock]:
     """Detecte tous les OB valides dans le DataFrame.
 
@@ -92,13 +102,20 @@ def detect_order_blocks(
     if sweeps is None:
         sweeps = find_sweeps(df, swings, min_depth_atr=min_sweep_depth_atr)
 
+    # Si l'appelant n'a pas force le mode, on lit l'env var globale a CHAQUE appel
+    # (defaut "bos" = comportement V13). Lu dynamiquement pour que load_model V14
+    # puisse l'activer apres le module import.
+    effective_mode = validation_mode if validation_mode != "bos" else _get_global_validation_mode()
+
     obs: list[OrderBlock] = []
 
     for sweep in sweeps:
         if sweep.direction == "bullish":
-            ob = _try_bullish_ob(df, sweep, max_group_size, max_bars_after_sweep, min_group_size)
+            ob = _try_bullish_ob(df, sweep, max_group_size, max_bars_after_sweep, min_group_size,
+                                 validation_mode=effective_mode)
         else:
-            ob = _try_bearish_ob(df, sweep, max_group_size, max_bars_after_sweep, min_group_size)
+            ob = _try_bearish_ob(df, sweep, max_group_size, max_bars_after_sweep, min_group_size,
+                                 validation_mode=effective_mode)
         if ob is not None:
             obs.append(ob)
 
@@ -134,6 +151,7 @@ def _try_bullish_ob(
     max_group_size: int,
     max_bars_after_sweep: int,
     min_group_size: int = 1,
+    validation_mode: str = "bos",
 ) -> OrderBlock | None:
     """Cherche un OB bullish autour d'un sweep bullish (low pris).
 
@@ -184,15 +202,22 @@ def _try_bullish_ob(
     ob_high = float(highs[group_start:group_end + 1].max())
     ob_low = float(lows[group_start:group_end + 1].min())
 
-    # 3. Cherche la validation : close > ob_high dans les `max_bars_after_sweep` bougies
-    # apres le sweep (en partant de sweep_idx, ou apres si sweep est dans le groupe).
+    # 3. Validation selon le mode :
+    # - "bos" (V12) : close > ob_high (cassure de structure)
+    # - "mitigation" (V14) : low <= ob_high (le prix revient toucher la zone OB)
     val_start = max(sweep_idx, group_end) + 1
     val_end = min(val_start + max_bars_after_sweep, len(df))
     validation_idx = None
-    for j in range(val_start, val_end):
-        if closes[j] > ob_high:
-            validation_idx = j
-            break
+    if validation_mode == "mitigation":
+        for j in range(val_start, val_end):
+            if lows[j] <= ob_high:
+                validation_idx = j
+                break
+    else:  # "bos" (default = V12 comportement actuel)
+        for j in range(val_start, val_end):
+            if closes[j] > ob_high:
+                validation_idx = j
+                break
 
     if validation_idx is None:
         return None
@@ -221,6 +246,7 @@ def _try_bearish_ob(
     max_group_size: int,
     max_bars_after_sweep: int,
     min_group_size: int = 1,
+    validation_mode: str = "bos",
 ) -> OrderBlock | None:
     """Symetrique : sweep d'un high -> OB bearish (bougies haussieres consecutives)."""
     opens = df["open"].values
@@ -251,13 +277,22 @@ def _try_bearish_ob(
     ob_high = float(highs[group_start:group_end + 1].max())
     ob_low = float(lows[group_start:group_end + 1].min())
 
+    # Validation selon le mode :
+    # - "bos" (V12) : close < ob_low (cassure de structure)
+    # - "mitigation" (V14) : high >= ob_low (le prix revient toucher la zone OB)
     val_start = max(sweep_idx, group_end) + 1
     val_end = min(val_start + max_bars_after_sweep, len(df))
     validation_idx = None
-    for j in range(val_start, val_end):
-        if closes[j] < ob_low:
-            validation_idx = j
-            break
+    if validation_mode == "mitigation":
+        for j in range(val_start, val_end):
+            if highs[j] >= ob_low:
+                validation_idx = j
+                break
+    else:  # "bos" (default = V12 comportement actuel)
+        for j in range(val_start, val_end):
+            if closes[j] < ob_low:
+                validation_idx = j
+                break
 
     if validation_idx is None:
         return None
