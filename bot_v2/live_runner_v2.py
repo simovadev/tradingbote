@@ -2170,6 +2170,25 @@ def run_live(test_dry_run: bool = False):
                         # Batch pour le dashboard avec extras (entry/SL/TP/RR/threshold)
                         try:
                             _extras = entry[6] if len(entry) > 6 and isinstance(entry[6], dict) else {}
+                            # FIGEAGE EXEC : l'exec_ts/price/bars_latency doivent refleter
+                            # le PREMIER scan ou l'OB est apparu (= vraie reactivite), pas
+                            # le re-evalue qui grimpe chaque cycle. On memorise dans
+                            # state._ob_first_exec[key] la 1ere valeur et on la reutilise.
+                            if not hasattr(state, "_ob_first_exec"):
+                                state._ob_first_exec = {}
+                            _ob_key = (entry[0], str(entry[1]), entry[2])  # (inst, ts_ob, dir)
+                            if _ob_key in state._ob_first_exec:
+                                _frozen = state._ob_first_exec[_ob_key]
+                                _extras = {**_extras,
+                                           "exec_ts": _frozen["exec_ts"],
+                                           "exec_price": _frozen["exec_price"],
+                                           "bars_latency": _frozen["bars_latency"]}
+                            else:
+                                state._ob_first_exec[_ob_key] = {
+                                    "exec_ts": _extras.get("exec_ts"),
+                                    "exec_price": _extras.get("exec_price"),
+                                    "bars_latency": _extras.get("bars_latency"),
+                                }
                             _cycle_rejected_batch.append({
                                 "instrument": entry[0],
                                 "ts": str(entry[1]),
@@ -2177,7 +2196,7 @@ def run_live(test_dry_run: bool = False):
                                 "reason": entry[3],
                                 "ml_proba": entry[4] if len(entry) > 4 else None,
                                 "score": entry[5] if len(entry) > 5 else None,
-                                **_extras,  # threshold, entry, sl, tp, rr, ob_high, ob_low
+                                **_extras,  # threshold, entry, sl, tp, rr, ob_high, ob_low, exec_*
                             })
                         except Exception:
                             pass
@@ -2337,6 +2356,11 @@ def run_live(test_dry_run: bool = False):
                     _ev_asset = state._evaluated_obs.get(asset)
                     if _ev_asset and len(_ev_asset) > 800:
                         state._evaluated_obs[asset] = set(sorted(_ev_asset)[-800:])
+                    # Cleanup _ob_first_exec : cap a 2000 entrees (anti-fuite memoire)
+                    if hasattr(state, "_ob_first_exec") and len(state._ob_first_exec) > 2000:
+                        _keys = list(state._ob_first_exec.keys())
+                        for _k in _keys[:len(_keys) - 2000]:
+                            state._ob_first_exec.pop(_k, None)
 
                 # V5.9 (2026-05-21) : Stats poussees a chaque cycle (~20s).
                 # Avant : int(time()) % 300 < SCAN_INTERVAL_SEC -> fenetre de 5s
