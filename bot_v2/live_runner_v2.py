@@ -1186,19 +1186,44 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     # Calcul lots selon balance (utilise les VRAIES valeurs MT5 du broker)
     risk_pct = get_risk_pct(balance)
     try:
-
-        # Distance SL/TP en unites de prix (depuis l'OB)
-        sl_distance = abs(setup.entry_price - setup.stop_loss)
-        if sl_distance == 0:
-            log.error(f"SL distance = 0 sur {instrument}")
-            return False
-
-        # V2 : SL/TP et entry du setup ICT inchanges (LIMIT au prix OB).
-        # Pas besoin de check derive : si prix passe l'entry -> trade fill -> RR garanti.
-        # Si prix touche pas l'entry en 60min -> ordre annule, on passe.
+        # V14 (2026-05-24) : on calcule les lots sur le PRIX MARCHE REEL (tick courant),
+        # pas sur setup.entry_price (= prix OB theorique). Raison : avec V14 MARKET +
+        # mitigation, le prix execute est souvent tres proche du SL (bougie qui touche
+        # l'OB), donc sl_distance_reel << sl_distance_theorique. Resultat : risk_per_lot
+        # plus petit -> on peut prendre BEAUCOUP plus de lots pour le meme risk EUR ->
+        # gain proportionnellement plus gros quand le TP touche (RR reel pouvant atteindre
+        # 5-15x). Cf decision user 2026-05-24 : "calcule le lot par rapport a l execution".
         sl_price = float(setup.stop_loss)
         tp_price = float(setup.take_profit)
+        # entry_price garde la valeur theorique pour les logs et la lecture du setup,
+        # mais sl_distance est recalcule sur le tick (cf bloc suivant).
         entry_price = float(setup.entry_price)
+
+        # Prix marche reel pour le calcul lots = bid pour SELL, ask pour BUY (= le
+        # prix auquel MT5 va executer le MARKET dans ~quelques millisecondes).
+        _tick_lots = mt5_exec.get_tick(instrument)
+        if _tick_lots is not None:
+            if setup.direction == "bullish":
+                market_price_for_lots = float(_tick_lots["ask"])
+            else:
+                market_price_for_lots = float(_tick_lots["bid"])
+        else:
+            # Fallback tick indisponible : on utilise setup.entry_price (= comportement legacy)
+            market_price_for_lots = entry_price
+            log.warning(f"{instrument} : tick indispo, fallback sl_distance sur entry_price theorique")
+
+        # Distance SL en unites de prix : DEPUIS LE PRIX MARCHE (= reel d'execution),
+        # PAS depuis l'OB theorique. On clamp >= 1 tick pour eviter division par 0.
+        sl_distance = abs(market_price_for_lots - sl_price)
+        if sl_distance == 0:
+            log.error(f"SL distance reel = 0 sur {instrument} (market={market_price_for_lots}, sl={sl_price})")
+            return False
+
+        log.info(
+            f"{instrument} : lots calc sur PRIX MARCHE {market_price_for_lots:.5f} "
+            f"(entry OB theorique={entry_price:.5f}) -> sl_dist_reel={sl_distance:.5f} "
+            f"(vs theorique={abs(entry_price - sl_price):.5f})"
+        )
 
         # Risk en EUR (compte EUR)
         risk_eur = balance * risk_pct
