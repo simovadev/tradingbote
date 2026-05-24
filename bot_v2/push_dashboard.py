@@ -149,9 +149,10 @@ class DashboardPusher:
         score: int,
         ml_proba: float,
         killzone: str | None = None,
+        candles: list[dict] | None = None,
     ) -> None:
         ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-        self.push_event("SETUP", {
+        data = {
             "ts": ts_str,
             "direction": direction,
             "entry_price": float(entry_price),
@@ -161,13 +162,25 @@ class DashboardPusher:
             "score": int(score),
             "ml_proba": float(ml_proba),
             "killzone": killzone,
-        }, instrument=instrument)
+        }
+        if candles:
+            data["candles"] = candles
+        self.push_event("SETUP", data, instrument=instrument)
 
-    def push_rejected_batch(self, items: list[dict[str, Any]]) -> None:
-        """Batch des rejets ML d'un cycle (1 push contient tous les rejets)."""
+    def push_rejected_batch(self, items: list[dict[str, Any]],
+                            candles_by_asset: dict[str, list[dict]] | None = None) -> None:
+        """Batch des rejets ML d'un cycle (1 push contient tous les rejets).
+
+        candles_by_asset : optionnel, {asset: [bougies M1]} pour que le dashboard
+        affiche un chart Lightweight au clic. 1 copie par actif (partagee entre
+        tous les rejets de cet actif), pas par item.
+        """
         if not items:
             return
-        self.push_event("REJECTED", {"items": items})
+        payload = {"items": items}
+        if candles_by_asset:
+            payload["candles_by_asset"] = candles_by_asset
+        self.push_event("REJECTED", payload)
 
     def push_trade_executed(
         self,
