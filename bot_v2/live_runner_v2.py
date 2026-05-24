@@ -2124,12 +2124,14 @@ def run_live(test_dry_run: bool = False):
                     if len(r.get("rejected_log") or []) > 0:
                         log.info(f"DEBUG {inst}: worker a retourne {len(r['rejected_log'])} rejets")
 
-                    # Extract 100 last M1 bars once per asset (shared payload)
+                    # Extract 60 last M1 bars once per asset (shared payload).
+                    # 60 = 1h de contexte, suffit pour un OB valide 30min. Payload
+                    # leger pour eviter les timeouts d'upload depuis le VPS.
                     if inst not in _cycle_candles_by_asset:
                         _buf = DATA_BUFFERS.get(inst)
                         if _buf is not None and _buf.df_m1 is not None and len(_buf.df_m1) > 0:
                             try:
-                                _df_tail = _buf.df_m1.tail(100)
+                                _df_tail = _buf.df_m1.tail(60)
                                 _cycle_candles_by_asset[inst] = [
                                     {
                                         "t": int(ts.timestamp()),

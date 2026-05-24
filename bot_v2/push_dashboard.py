@@ -47,7 +47,7 @@ class DashboardPusher:
         self,
         url: str | None,
         session_id: str,
-        timeout_sec: float = 2.0,
+        timeout_sec: float = 10.0,  # 2s etait trop court pour les payloads REJECTED+candles (~56KB)
         max_queue_size: int = 500,
     ) -> None:
         self.url = (url or "").strip() or None
