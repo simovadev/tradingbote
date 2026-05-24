@@ -2221,18 +2221,21 @@ def run_live(test_dry_run: bool = False):
                     )
                     if _cycle_rejected_batch:
                         # Bougies des actifs concernes par au moins un rejet
-                        _rejected_assets = {it.get("instrument") for it in _cycle_rejected_batch}
-                        _candles_for_batch = {
-                            a: _cycle_candles_by_asset[a]
-                            for a in _rejected_assets
-                            if a in _cycle_candles_by_asset
-                        }
-                        PUSHER.push_rejected_batch(
-                            _cycle_rejected_batch,
-                            candles_by_asset=_candles_for_batch or None,
-                        )
+                        try:
+                            _rejected_assets = {it.get("instrument") for it in _cycle_rejected_batch}
+                            _candles_for_batch = {
+                                a: _cycle_candles_by_asset[a]
+                                for a in _rejected_assets
+                                if a in _cycle_candles_by_asset
+                            }
+                            PUSHER.push_rejected_batch(
+                                _cycle_rejected_batch,
+                                candles_by_asset=_candles_for_batch if _candles_for_batch else None,
+                            )
+                        except Exception as _re:
+                            log.exception(f"push_rejected_batch FAIL : {_re}")
                 except Exception as _pe:
-                    log.debug(f"push_cycle fail: {_pe}")
+                    log.exception(f"push_cycle FAIL : {_pe}")
 
                 for asset in active_assets:
                     setups = _setups_by_asset.get(asset, [])
