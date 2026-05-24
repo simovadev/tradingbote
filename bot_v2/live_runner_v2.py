@@ -1292,6 +1292,44 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
         log.error(f"Calc lots error {instrument}: {e}")
         return False
 
+    # === SECURITE 3 (2026-05-24) : RR REEL au prix marche actuel ===
+    # Probleme : le bot envoie un MARKET au prix actuel, mais SL/TP sont calcules
+    # sur le prix OB (theorique). Si le mouvement est deja parti, le RR reel
+    # peut etre <1 (ex: prix monte de 40 pips depuis OB -> SL plus loin, TP plus
+    # pres). Filtre : si RR_marche < 1.0, on skip (trop tard, edge perdu).
+    try:
+        tick = mt5_exec.get_tick(instrument)
+        if tick is not None:
+            if setup.direction == "bullish":
+                market_price = float(tick["ask"])
+                risk_reel = market_price - sl_price
+                reward_reel = tp_price - market_price
+            else:
+                market_price = float(tick["bid"])
+                risk_reel = sl_price - market_price
+                reward_reel = market_price - tp_price
+            if risk_reel <= 0:
+                log.warning(
+                    f"SKIP {instrument} : prix marche {market_price:.5f} deja au-dela "
+                    f"du SL {sl_price:.5f}. Mouvement totalement parti."
+                )
+                return False
+            rr_reel = reward_reel / risk_reel
+            if rr_reel < 1.0:
+                log.warning(
+                    f"SKIP {instrument} : RR marche actuel = {rr_reel:.2f} < 1.0 "
+                    f"(market={market_price:.5f} entry_ob={entry_price:.5f} "
+                    f"sl={sl_price:.5f} tp={tp_price:.5f}). Mouvement deja parti."
+                )
+                return False
+            if rr_reel < float(setup.rr) * 0.7:
+                log.info(
+                    f"{instrument} : RR marche = {rr_reel:.2f} (RR theorique "
+                    f"{float(setup.rr):.2f}). Degrade mais >= 1.0, on prend."
+                )
+    except Exception as _e:
+        log.debug(f"RR marche check {instrument} KO ({_e}) - filtre saute")
+
     # DEBUG V8 (2026-05-21) : trace avant l'envoi de l'ordre
     log.info(
         f"DEBUG {instrument} : avant place_market_order | lots={lots} "
