@@ -2120,6 +2120,10 @@ def run_live(test_dry_run: bool = False):
                     for line in r["diag_log"]:
                         log.info(line)
 
+                    # DEBUG TEMPORAIRE : compteur de rejets retournes par le worker
+                    if len(r.get("rejected_log") or []) > 0:
+                        log.info(f"DEBUG {inst}: worker a retourne {len(r['rejected_log'])} rejets")
+
                     # Extract 100 last M1 bars once per asset (shared payload)
                     if inst not in _cycle_candles_by_asset:
                         _buf = DATA_BUFFERS.get(inst)
