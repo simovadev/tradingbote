@@ -732,6 +732,13 @@ def compute_asset(payload: dict) -> dict:
                     _sl = float(r.trade_setup.stop_loss)
                     _tp = float(r.trade_setup.take_profit)
                     _rr = float(r.trade_setup.rr)
+                # Marqueur EXEC : la DERNIERE bougie M1 connue = exactement ce que
+                # le bot voit quand il decide. C'est la qu'il poserait l'ordre MT5.
+                # exec_ts dans le referentiel des bougies (= s'aligne sur le chart).
+                # bars_latency = nb de bougies entre validation OB et decision (= reactivite).
+                _exec_ts = df_m1.index[-1].isoformat()
+                _exec_price = float(df_m1.iloc[-1]["close"])
+                _bars_latency = int(len(df_m1) - 1 - ob.validation_index)
                 rejected_log.append((
                     instrument, ts_ob, ob.direction, reason, None,
                     int(r.score) if r.score is not None else None,
@@ -741,6 +748,8 @@ def compute_asset(payload: dict) -> dict:
                         "threshold": float(threshold),
                         "entry": _entry, "sl": _sl, "tp": _tp, "rr": _rr,
                         "ob_high": float(ob.ob_high), "ob_low": float(ob.ob_low),
+                        "exec_ts": _exec_ts, "exec_price": _exec_price,
+                        "bars_latency": _bars_latency,
                     },
                 ))
                 diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
@@ -757,6 +766,10 @@ def compute_asset(payload: dict) -> dict:
                 _sl = float(r.trade_setup.stop_loss)
                 _tp = float(r.trade_setup.take_profit)
                 _rr = float(r.trade_setup.rr)
+                # Marqueur EXEC : derniere bougie connue (cf bloc no_trade)
+                _exec_ts = df_m1.index[-1].isoformat()
+                _exec_price = float(df_m1.iloc[-1]["close"])
+                _bars_latency = int(len(df_m1) - 1 - ob.validation_index)
                 rejected_log.append((
                     instrument, ts_ob, ob.direction,
                     f"ml_below_thr_{proba:.3f}", float(proba), int(r.score),
@@ -764,6 +777,8 @@ def compute_asset(payload: dict) -> dict:
                         "threshold": float(threshold),
                         "entry": _entry, "sl": _sl, "tp": _tp, "rr": _rr,
                         "ob_high": float(ob.ob_high), "ob_low": float(ob.ob_low),
+                        "exec_ts": _exec_ts, "exec_price": _exec_price,
+                        "bars_latency": _bars_latency,
                     },
                 ))
                 diag_reasons[f"ml_below_{threshold:.2f}"] = (
