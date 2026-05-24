@@ -71,21 +71,27 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
 #   @0.75 : 2 trades,  WR 100% (trop strict)
 # Avec V11.2 (cap age 30min aligne OOS), 0.70 donne le meilleur compromis
 # volume/WR. Conforme aux chiffres OOS V11 (WR ~81% au seuil 0.70).
+# V14 (2026-05-25) : seuil descendu 0.70 -> 0.60.
+# OOS V14 a seuil 0.60 : WR moyen 66.3% / 1169 trades sur 6 mois (~9/jour).
+# Expectancy theorique (RR=2) = +0.99R/trade vs +1.26R a 0.70.
+# Mais volume x3.2 -> total expectancy/jour +160% vs 0.70.
+# Avec RR reel V14 (~3 via EXEC pres SL), expectancy/trade = +1.65R.
+# Cf decision user 2026-05-25 apres analyse OOS V14 complete.
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.70,
-    "NAS100": 0.70,
-    "GER40":  0.70,
-    "BTCUSD": 0.70,
-    "EURUSD": 0.70,
-    "GBPUSD": 0.70,
-    "AUDUSD": 0.70,
-    "USDJPY": 0.70,
-    "SP500":  0.70,
-    "DJ30":   0.70,
-    "UK100":  0.70,
-    "FRA40":  0.70,
-    "USDCAD": 0.70,
-    "USDCHF": 0.70,
+    "XAUUSD": 0.60,
+    "NAS100": 0.60,
+    "GER40":  0.60,
+    "BTCUSD": 0.60,
+    "EURUSD": 0.60,
+    "GBPUSD": 0.60,
+    "AUDUSD": 0.60,
+    "USDJPY": 0.60,
+    "SP500":  0.60,
+    "DJ30":   0.60,
+    "UK100":  0.60,
+    "FRA40":  0.60,
+    "USDCAD": 0.60,
+    "USDCHF": 0.60,
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {
