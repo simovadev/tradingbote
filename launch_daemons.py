@@ -42,9 +42,22 @@ WINDOW_S = 60.0
 POLL_INTERVAL_S = 3.0
 
 
+# V14 (2026-05-24) : si des modeles V14 existent dans bot_v2/, on force
+# OB_VALIDATION_MODE=mitigation pour TOUS les daemons spawn. Sinon les caches
+# sont ecrits en mode BOS et le bot voit des OB tardifs (bars_latency 5-25)
+# au lieu de 0-2 attendu pour V14.
+_v14_models_dir = ROOT / "bot_v2"
+if list(_v14_models_dir.glob("ml_model_*_vantage_v14.pkl")):
+    if os.environ.get("OB_VALIDATION_MODE") != "mitigation":
+        os.environ["OB_VALIDATION_MODE"] = "mitigation"
+        print(f"V14 detecte -> OB_VALIDATION_MODE=mitigation (propage aux daemons)")
+
+
 def spawn(asset: str) -> subprocess.Popen:
     log_path = ROOT / f"daemon_{asset}.log"
     f = open(log_path, "ab", buffering=0)
+    # Subprocess.Popen herite env de parent par defaut, donc OB_VALIDATION_MODE
+    # set ci-dessus est propage automatiquement.
     p = subprocess.Popen(
         [PY, "-u", DAEMON_SCRIPT, "--assets", asset, "--sleep_align"],
         stdout=f, stderr=subprocess.STDOUT,
