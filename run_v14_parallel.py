@@ -16,7 +16,7 @@ TRAIN_END = pd.Timestamp('2026-05-22', tz='UTC')
 print(f'=== V14 BUILD : {len(ALL_ASSETS)} actifs EN PARALLELE (OB sans BOS = mitigation immediate) ===', flush=True)
 print(f'Cores : {os.cpu_count()}, N_WORKERS env: {os.environ.get("N_WORKERS", "auto")}', flush=True)
 print(f'OB_VALIDATION_MODE = {os.environ["OB_VALIDATION_MODE"]}', flush=True)
-df = build_dataset(TRAIN_START, TRAIN_END, ALL_ASSETS, output_path=None, chunk_months=0.5, ltf='M1', version_suffix='_V14_VANTAGE')
+df = build_dataset(TRAIN_START, TRAIN_END, ALL_ASSETS, output_path=None, chunk_months=0.25, ltf='M1', version_suffix='_V14_VANTAGE')
 print(f'=== TOTAL : {len(df):,} lignes sur {len(ALL_ASSETS)} actifs ===', flush=True)
 if 'instrument' in df.columns:
     print(df.groupby('instrument').size().to_string(), flush=True)
