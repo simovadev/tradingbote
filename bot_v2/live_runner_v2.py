@@ -2318,20 +2318,44 @@ def run_live(test_dry_run: bool = False):
                         last_bar_ts=_last_bar_ts,
                     )
                     if _cycle_rejected_batch:
-                        # Bougies des actifs concernes par au moins un rejet
-                        try:
-                            _rejected_assets = {it.get("instrument") for it in _cycle_rejected_batch}
-                            _candles_for_batch = {
-                                a: _cycle_candles_by_asset[a]
-                                for a in _rejected_assets
-                                if a in _cycle_candles_by_asset
-                            }
-                            PUSHER.push_rejected_batch(
-                                _cycle_rejected_batch,
-                                candles_by_asset=_candles_for_batch if _candles_for_batch else None,
-                            )
-                        except Exception as _re:
-                            log.exception(f"push_rejected_batch FAIL : {_re}")
+                        # V14 (2026-05-24) : filtre TEMPS REEL. Le bot scanne en time
+                        # broker (df_m1.index) qui peut etre fige le week-end ou avoir
+                        # un gros offset (Vantage ~+3h ete). On veut pas pusher des
+                        # setups dont la bougie remonte a > 30min UTC REEL = mort,
+                        # marche ferme, info plus exploitable.
+                        _utc_now = pd.Timestamp.now(tz="UTC")
+                        _real_cutoff = _utc_now - pd.Timedelta(minutes=30)
+                        _filtered_batch = []
+                        for _it in _cycle_rejected_batch:
+                            _ob_ts_raw = _it.get("ts")
+                            try:
+                                _ob_ts = pd.Timestamp(_ob_ts_raw)
+                                if _ob_ts.tz is None:
+                                    _ob_ts = _ob_ts.tz_localize("UTC")
+                            except Exception:
+                                _filtered_batch.append(_it)  # garde si ts illisible
+                                continue
+                            if _ob_ts >= _real_cutoff:
+                                _filtered_batch.append(_it)
+                        _dropped = len(_cycle_rejected_batch) - len(_filtered_batch)
+                        if _dropped > 0:
+                            log.info(f"REJECTED filter: dropped {_dropped} setups dont ts < UTC-30min (marche probablement ferme)")
+                        if not _filtered_batch:
+                            pass  # rien a pusher
+                        else:
+                            try:
+                                _rejected_assets = {it.get("instrument") for it in _filtered_batch}
+                                _candles_for_batch = {
+                                    a: _cycle_candles_by_asset[a]
+                                    for a in _rejected_assets
+                                    if a in _cycle_candles_by_asset
+                                }
+                                PUSHER.push_rejected_batch(
+                                    _filtered_batch,
+                                    candles_by_asset=_candles_for_batch if _candles_for_batch else None,
+                                )
+                            except Exception as _re:
+                                log.exception(f"push_rejected_batch FAIL : {_re}")
                 except Exception as _pe:
                     log.exception(f"push_cycle FAIL : {_pe}")
 
