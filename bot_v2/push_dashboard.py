@@ -71,9 +71,11 @@ class DashboardPusher:
             except queue.Empty:
                 continue
             try:
-                requests.post(self.url, json=msg, timeout=self.timeout_sec)  # type: ignore[union-attr]
+                r = requests.post(self.url, json=msg, timeout=self.timeout_sec)  # type: ignore[union-attr]
+                if r.status_code >= 400:
+                    log.warning(f"DashboardPusher: push HTTP {r.status_code} type={msg.get('type')} | {r.text[:200]}")
             except Exception as e:
-                log.debug(f"push fail ({type(e).__name__}): {str(e)[:120]}")
+                log.warning(f"DashboardPusher: push fail ({type(e).__name__}) type={msg.get('type')}: {str(e)[:200]}")
             finally:
                 self._queue.task_done()
 
