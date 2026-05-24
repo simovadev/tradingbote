@@ -2108,6 +2108,9 @@ def run_live(test_dry_run: bool = False):
                 _cycle_latencies: dict[str, int] = {}
                 _cycle_setups_pushed = 0
                 _cycle_rejected_batch: list[dict] = []
+                # V13.1 : bougies M1 par actif pour le dashboard (1 seule copie
+                # par actif, partagee entre tous les rejets/setups de cet actif)
+                _cycle_candles_by_asset: dict[str, list[dict]] = {}
                 for r in results:
                     inst = r["instrument"]
                     if r.get("error"):
@@ -2116,6 +2119,30 @@ def run_live(test_dry_run: bool = False):
                         continue
                     for line in r["diag_log"]:
                         log.info(line)
+
+                    # V13.1 (2026-05-24) : on extrait les ~200 dernieres bougies M1
+                    # UNE FOIS par actif. Stockees dans _cycle_candles_by_asset et
+                    # envoyees une seule fois dans le batch dashboard (pas par item).
+                    # Le dashboard les affiche dans le modal avec Lightweight Charts
+                    # + overlays Entry/SL/TP/OB.
+                    if inst not in _cycle_candles_by_asset:
+                        _buf = DATA_BUFFERS.get(inst)
+                        if _buf is not None and _buf.df_m1 is not None and len(_buf.df_m1) > 0:
+                            try:
+                                _df_tail = _buf.df_m1.tail(200)
+                                _cycle_candles_by_asset[inst] = [
+                                    {
+                                        "t": int(ts.timestamp()),   # epoch seconds
+                                        "o": float(row["open"]),
+                                        "h": float(row["high"]),
+                                        "l": float(row["low"]),
+                                        "c": float(row["close"]),
+                                    }
+                                    for ts, row in _df_tail.iterrows()
+                                ]
+                            except Exception:
+                                pass
+
                     for entry in r["rejected_log"]:
                         # entry = (instrument, ts, direction, reason, ml_proba, score, extras_dict?)
                         # SQLite log_rejected n'accepte que les 6 premiers.
@@ -2165,6 +2192,7 @@ def run_live(test_dry_run: bool = False):
                                 score=s["r"].score,
                                 ml_proba=s["proba"],
                                 killzone=None,
+                                candles=_cycle_candles_by_asset.get(inst),
                             )
                             _cycle_setups_pushed += 1
                         except Exception as _pe:
@@ -2196,7 +2224,15 @@ def run_live(test_dry_run: bool = False):
                         last_bar_ts=_last_bar_ts,
                     )
                     if _cycle_rejected_batch:
-                        PUSHER.push_rejected_batch(_cycle_rejected_batch)
+                        # V13.1 : on ne passe que les bougies des actifs concernes
+                        # par au moins un rejet (evite de gonfler le payload).
+                        _rejected_assets = {it.get("instrument") for it in _cycle_rejected_batch}
+                        _candles_for_batch = {
+                            a: _cycle_candles_by_asset[a]
+                            for a in _rejected_assets
+                            if a in _cycle_candles_by_asset
+                        }
+                        PUSHER.push_rejected_batch(_cycle_rejected_batch, candles_by_asset=_candles_for_batch)
                 except Exception as _pe:
                     log.debug(f"push_cycle fail: {_pe}")
 
