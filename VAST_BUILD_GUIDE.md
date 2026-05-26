@@ -190,6 +190,89 @@ Au démarrage de l'instance, SSH peut prendre 30-60s à être ready. Si le premi
 
 ---
 
+## Session V15.1 — 2026-05-25 (config ULTRA RAPIDE)
+
+### Hardware loué
+- **AMD EPYC 9754** 128 cores / **512 threads**
+- **566 Go RAM**
+- 32 Go disk overlay (suffit pour data 850 Mo + dataset ~5 Go)
+- Prix : ~$1.215/h
+
+### Config qui a marché
+
+```bash
+# 1. Connexion SSH (test 5s)
+ssh -i ~/.ssh/vast_v8 -p <PORT> -o StrictHostKeyChecking=no root@<IP> "uname -a; nproc"
+
+# 2. Clone repo (~30s)
+ssh -i ~/.ssh/vast_v8 -p <PORT> root@<IP> "mkdir -p /workspace && cd /workspace && git clone https://github.com/simovadev/tradingbote.git TradingBot"
+
+# 3. Push code modifié local (si modifs hors git) — scp les .py modifiés
+scp -i ~/.ssh/vast_v8 -P <PORT> \
+  /c/Users/Shadow/TradingBot/bot_v2/config.py \
+  /c/Users/Shadow/TradingBot/bot_v2/ml_filter.py \
+  /c/Users/Shadow/TradingBot/bot_v2/ml_dataset.py \
+  /c/Users/Shadow/TradingBot/bot_v2/backtest.py \
+  /c/Users/Shadow/TradingBot/bot_v2/train_v15_1_vantage.py \
+  root@<IP>:/workspace/TradingBot/bot_v2/
+scp -i ~/.ssh/vast_v8 -P <PORT> \
+  /c/Users/Shadow/TradingBot/run_v15_1_parallel.py \
+  root@<IP>:/workspace/TradingBot/
+
+# 4. Upload data_vantage (851 Mo, ~1 min sur fibre)
+scp -i ~/.ssh/vast_v8 -P <PORT> /c/Users/Shadow/data_vantage_full.tar root@<IP>:/workspace/
+
+# 5. Extract data_vantage
+ssh -i ~/.ssh/vast_v8 -p <PORT> root@<IP> "cd /workspace/TradingBot && rm -rf data_vantage && tar -xf /workspace/data_vantage_full.tar -C . && du -sh data_vantage/"
+
+# 6. Install deps Python (~1 min)
+ssh -i ~/.ssh/vast_v8 -p <PORT> root@<IP> "pip install --quiet pandas==2.2.3 numpy==2.1.3 pyarrow==18.0.0 lightgbm scikit-learn"
+
+# 7. LANCER LE BUILD (background nohup)
+# ⚠️ IMPORTANT : utiliser `python3` (pas `python` qui n'existe pas sur Vast)
+# ⚠️ BLAS=1 obligatoire pour éviter sur-souscription
+# ⚠️ N_WORKERS=128 pour 512 threads = sur-souscription 4x volontaire (I/O bound)
+ssh -i ~/.ssh/vast_v8 -p <PORT> root@<IP> \
+  "cd /workspace/TradingBot && nohup env \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    N_WORKERS=128 \
+    python3 run_v15_1_parallel.py > /workspace/build_v15_1.log 2>&1 &"
+
+# 8. Vérifier saturation 30s après lancement
+ssh -i ~/.ssh/vast_v8 -p <PORT> root@<IP> "uptime && top -bn1 | head -3 && tail -20 /workspace/build_v15_1.log"
+# Attendu : load avg > 500, %Cpu(s) user > 50%, idle < 50%, tasks running > 100
+
+# 9. Suivre le build en direct (optionnel)
+ssh -i ~/.ssh/vast_v8 -p <PORT> root@<IP> "tail -f /workspace/build_v15_1.log"
+```
+
+### Pièges rencontrés et résolus
+
+1. **`python` introuvable** → utiliser `python3` (le binaire `python` n'existe pas par défaut sur l'image Vast).
+2. **chunk_months** : `0.25` (= ~7.5 jours/chunk) donne 5614 chunks pour 14 actifs × 8 ans. Avec 128 workers, queue saturée pendant 95% du build.
+3. **N_WORKERS=128 sur 512 threads** : intentionnel. Le pipeline ICT/SMC est mixte CPU + I/O (parquet read + numpy heavy), la sur-souscription 4x masque les latences I/O. À 256 workers : moins de gain, plus de mémoire (430 Go vs 330).
+4. **BLAS env vars** obligatoires : sans elles, chaque worker numpy lance ses propres threads BLAS → 128 × 512 = 65 000 threads → context switch enfer.
+5. **MetaQuotes hcc files** : on n'utilise PAS l'historique brut MT5 sur Vast. On utilise les parquets `data_vantage/*.parquet` générés en amont via `download_vantage_history.py` localement.
+
+### Perf observée V15.1
+
+- **Build time** : ~10-15 min pour 5614 chunks (vs ~1.5-2h estimé initialement)
+- **Avancement** : ~600 chunks/min, ~125 workers actifs en moyenne
+- **Coût total** : ~$0.30 pour le build (~15 min × $1.215/h)
+- **CPU saturation** : 64.8% user / 34.3% idle / 1.0% sys
+- **Load average** : 2526 (8 cores virtuels par tâche, c'est normal en sur-souscription I/O)
+
+### Optimisations encore possibles (V16+)
+
+- Tester N_WORKERS=256 sur EPYC 9754 (peut être plus rapide pour gros chunks)
+- Pré-compiler les caches OB HTF (M15, H1) une fois par actif au lieu de par chunk → -30% temps
+- Stocker dataset partiel en format parquet snappy compressé (au lieu de plain) → moins d'I/O disque
+
+---
+
 ## Cleanup après build
 
 Une fois les modèles téléchargés sur le PC, **détruire l'instance Vast** pour ne plus payer :

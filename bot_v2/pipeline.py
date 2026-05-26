@@ -18,6 +18,7 @@ Ordre exact (bible §0 + §12) :
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -130,10 +131,21 @@ def evaluate_ob(
     target_date = ob.validation_ts.normalize()
     bias = compute_daily_bias(df_d1, target_date)
     res.daily_bias = bias
+    # V18.2 (Soufiane 2026-05-27) : daily_bias_aligned OBLIGATOIRE si STRICT_HTF=1
+    # Justification : analyse forensique 474k trades V18.1 -> +7 pts WR sur TOUS les actifs
+    # quand daily_bias_aligned=1. Sans ce filtre, 80% des trades sont contre le bias D1.
+    # V4 : flags individuels pour optim genetique
+    _strict_htf = os.environ.get("V18_STRICT_HTF", "0") == "1"
+    _require_fvg = os.environ.get("V18_REQUIRE_FVG", "0") == "1" or _strict_htf
+    _ban_london_close = os.environ.get("V18_BAN_LONDON_CLOSE", "0") == "1" or _strict_htf
+    _ban_ny_lunch = os.environ.get("V18_BAN_NY_LUNCH", "0") == "1" or _strict_htf
     if bias is None:
         # Pas de daily bias calculable -> on continue (manque de data)
         res.daily_bias_ok = None
         res.confluences.append("daily_bias=unknown")
+        if _strict_htf:
+            res.rejection_reason = "V18.2 STRICT_HTF : daily_bias non calculable, on rejette"
+            return res
     elif bias.bias == ob.direction:
         res.daily_bias_ok = True
         res.score += 25
@@ -157,9 +169,15 @@ def evaluate_ob(
             else:
                 res.daily_bias_ok = None
                 res.confluences.append("daily_bias=neutral_sans_feu_vert")
+                if _strict_htf:
+                    res.rejection_reason = "V18.2 STRICT_HTF : bias neutre sans feu vert H1, on rejette"
+                    return res
         else:
             res.daily_bias_ok = None
             res.confluences.append("daily_bias=neutral")
+            if _strict_htf:
+                res.rejection_reason = "V18.2 STRICT_HTF : bias neutre sans H1, on rejette"
+                return res
     else:
         # ABLATION v7 (user 2026-05-16) : daily_bias contraire devient penalite -15 pts.
         # Avant : REJET eliminatoire (58% des OB rejetes).
@@ -168,6 +186,10 @@ def evaluate_ob(
         res.daily_bias_ok = False
         res.score -= 15
         res.confluences.append(f"daily_bias_contraire_{bias.bias}_toléré")
+        # V18.2 : si STRICT_HTF, on rejette (bias contraire = boucher 80% des trades perdants)
+        if _strict_htf:
+            res.rejection_reason = f"V18.2 STRICT_HTF : daily_bias contraire ({bias.bias} vs {ob.direction})"
+            return res
 
     # ========== 2. KILLZONE (decision user 2026-05-16 : KZ devient SCORE, pas FILTRE) ==========
     # Exception FOREX (user 2026-05-17) : blocage 21h-02h NY (overnight US, volatilite plate).
@@ -187,10 +209,26 @@ def evaluate_ob(
     if kz is None:
         res.killzone_ok = False
         res.confluences.append("hors_KZ")
+        # V18.2 STRICT_HTF : pas de trade hors KZ
+        if _strict_htf:
+            res.rejection_reason = "V18.2 STRICT_HTF : hors killzone, rejet"
+            return res
     elif kz == "NY_Lunch":
         res.killzone_ok = False
         res.score -= 5
         res.confluences.append(f"killzone={kz}_malus")
+        # V18.2 : BAN_NY_LUNCH si flag
+        if _ban_ny_lunch:
+            res.rejection_reason = "V18.2 : BAN_NY_LUNCH=1"
+            return res
+    elif kz == "London_Close":
+        # V18.2 : kz_london_close TOXIQUE (WR forensic 34.9% < baseline 36.7%)
+        res.killzone_ok = True
+        res.score -= 8  # malus permanent meme en mode soft
+        res.confluences.append(f"killzone={kz}_TOXIQUE")
+        if _ban_london_close:
+            res.rejection_reason = "V18.2 : BAN_LONDON_CLOSE=1"
+            return res
     else:
         res.killzone_ok = True
         res.score += 15
@@ -522,6 +560,12 @@ def evaluate_ob(
     if not sync_found:
         res.score -= 5
         res.confluences.append("no_FVG_sync_malus")
+        # V18.2 (Soufiane 2026-05-27) : FVG_sync OBLIGATOIRE si STRICT_HTF=1
+        # Justification : analyse forensique 474k trades V18.1 -> +11.4 pts WR avec FVG_sync.
+        # Sans FVG_sync, WR brut 29.6% (catastrophe). Avec, 41%.
+        if _require_fvg:
+            res.rejection_reason = "V18.2 : REQUIRE_FVG=1 et pas de FVG sync"
+            return res
 
     # ========== 5. QUALITE AVANCEE (Unicorn, force OB, retests...) ==========
     swing_strength = get_param(instrument, "swing_strength_m1", 2)
@@ -685,11 +729,32 @@ def _find_parent_ob(
 
 
 def _get_htf_bar_containing(df_htf: pd.DataFrame, ts: pd.Timestamp) -> pd.Series | None:
-    """Retourne la bougie HTF qui contient le timestamp ts."""
+    """V17 FIX-6 : retourne la DERNIERE bougie HTF COMPLETE strictement avant ts.
+
+    Avant V17 : retournait df_htf.iloc[-1] de la portion <= ts, c'est-a-dire la
+    bougie HTF EN COURS si ts tombait au milieu de cette bougie. En training,
+    cette bougie est COMPLETE (open/high/low/close finals). En live, elle est
+    PARTIELLE (seulement les premieres bougies M1 ecoulees). Divergence majeure
+    sur les features PO3 (po3_body_pct importance 1948).
+
+    Maintenant : on prend la bougie HTF strictement AVANT le debut de la bougie
+    HTF en cours -> toujours complete des deux cotes.
+    """
+    if len(df_htf) < 2:
+        return None
     matches = df_htf[df_htf.index <= ts]
     if len(matches) == 0:
         return None
-    return matches.iloc[-1]
+    # Prend l'avant-derniere si la derniere est "en cours" (= contient ts)
+    # En pratique, df_htf est resample/fetch -> la derniere bougie peut etre
+    # partielle. La precedente est toujours complete.
+    last_bar_ts = matches.index[-1]
+    # Si ts == last_bar_ts.start, last_bar n'a pas encore commence ses M1
+    # Si ts > last_bar_ts.start, last_bar est en cours
+    # Dans les 2 cas, on prend la precedente (bougie complete).
+    if len(matches) >= 2:
+        return matches.iloc[-2]
+    return None
 
 
 def run_pipeline(

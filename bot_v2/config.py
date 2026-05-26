@@ -194,6 +194,64 @@ INSTRUMENTS: dict[str, dict] = {
         "role": "smt_only",
         "type": "energy",
     },
+    # === V18 NOUVEAUX ACTIFS (Soufiane 2026-05-26) — pool 28 actifs decoreles ===
+    # Indices Asia
+    "Nikkei225": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 50.0,
+        "label": "Nikkei 225 (Vantage)", "role": "primary", "type": "index",
+    },
+    "HK50": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 30.0,
+        "label": "Hang Seng 50", "role": "primary", "type": "index",
+    },
+    "BVSPX": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 100.0,
+        "label": "Bovespa (Bresil)", "role": "primary", "type": "index",
+    },
+    # FX EM / secondaires
+    "USDMXN": {
+        "duka": None, "tick_value": 5000.0, "min_sl_points": 0.0100,
+        "label": "USD/MXN (Peso)", "role": "primary", "type": "forex",
+    },
+    "USDZAR": {
+        "duka": None, "tick_value": 5500.0, "min_sl_points": 0.0100,
+        "label": "USD/ZAR (Rand)", "role": "primary", "type": "forex",
+    },
+    "NZDUSD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.0010,
+        "label": "NZD/USD", "role": "primary", "type": "forex",
+    },
+    # Energie
+    "CL-OIL": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.30,
+        "label": "WTI Crude (CL-OIL Vantage)", "role": "primary", "type": "energy",
+    },
+    "GAS-C": {
+        "duka": None, "tick_value": 10000.0, "min_sl_points": 0.05,
+        "label": "Natural Gas", "role": "primary", "type": "energy",
+    },
+    # Softs
+    "Cocoa-C": {
+        "duka": None, "tick_value": 10.0, "min_sl_points": 10.0,
+        "label": "Cocoa", "role": "primary", "type": "soft",
+    },
+    "Coffee-C": {
+        "duka": None, "tick_value": 375.0, "min_sl_points": 1.0,
+        "label": "Coffee", "role": "primary", "type": "soft",
+    },
+    "Sugar-C": {
+        "duka": None, "tick_value": 1120.0, "min_sl_points": 0.10,
+        "label": "Sugar", "role": "primary", "type": "soft",
+    },
+    "Wheat-C": {
+        "duka": None, "tick_value": 50.0, "min_sl_points": 5.0,
+        "label": "Wheat", "role": "primary", "type": "soft",
+    },
+    # Crypto
+    "ETHUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 5.0,
+        "label": "Ethereum", "role": "primary", "type": "crypto",
+    },
 }
 
 DEFAULT_INSTRUMENT = "XAUUSD"
@@ -340,7 +398,7 @@ INSTRUMENT_PARAMS: dict[str, dict] = {
         "parent_ob_tolerance_pct": 0.005,     # 0.5% = ~115 pts sur NAS a 23000
         "discount_premium_tol_pct": 0.08,
         "min_displacement_atr": 1.0,
-        "swing_strength_m1": 3,
+        "swing_strength_m1": 2,               # V18.1 : 3->2 (capture +30% OB ICT)
         "min_distance_tp_pct": 0.001,
         "min_score": 140,                     # NAS plus rare, on prend les meilleurs
         "min_quality": 55,
@@ -350,7 +408,7 @@ INSTRUMENT_PARAMS: dict[str, dict] = {
         "parent_ob_tolerance_pct": 0.005,     # 0.5% = ~110 pts sur DAX a 22000
         "discount_premium_tol_pct": 0.08,
         "min_displacement_atr": 1.0,
-        "swing_strength_m1": 3,
+        "swing_strength_m1": 2,               # V18.1 : 3->2
         "min_distance_tp_pct": 0.001,
         "min_score": 160,                     # GER tres actif, on serre fort
         "min_quality": 62,
@@ -374,7 +432,7 @@ INSTRUMENT_PARAMS: dict[str, dict] = {
         "parent_ob_tolerance_pct": 0.005,     # 0.5% = ~285\$ sur BTC a 57000
         "discount_premium_tol_pct": 0.08,
         "min_displacement_atr": 1.0,          # BTC explose, on serre comme indices
-        "swing_strength_m1": 3,               # 24/7 -> beaucoup de bruit micro
+        "swing_strength_m1": 2,               # V18.1 : 3->2 (+OB ICT)
         "min_distance_tp_pct": 0.001,
         "min_score": 145,                     # seuil moyen pour demarrer
         "min_quality": 55,
@@ -430,6 +488,72 @@ INSTRUMENT_PARAMS: dict[str, dict] = {
         "is_forex": True,
         "allow_against_daily_bias": True,
         "min_score": 140,                     # AUDUSD WR catastrophique en mode large, durcir
+        "min_quality": 55,
+    },
+    # === V15.1 FIX A12 (2026-05-25) : 6 actifs manquants ===
+    # Avant : SP500/DJ30/UK100/FRA40/USDCAD/USDCHF tombaient sur _DEFAULT_PARAMS
+    # (swing_strength=2, generic). Inadapte pour indices (besoin swing=3 + min_disp 1.0)
+    # et pour forex (besoin is_forex=True + allow_against_daily_bias).
+    "SP500": {
+        "parent_ob_tolerance_pct": 0.004,     # 0.4% = ~30 pts sur SP a 7500
+        "discount_premium_tol_pct": 0.08,
+        "min_displacement_atr": 1.0,
+        "swing_strength_m1": 3,
+        "min_distance_tp_pct": 0.001,
+        "min_score": 140,
+        "min_quality": 55,
+        "rr_max": 2.0,
+    },
+    "DJ30": {
+        "parent_ob_tolerance_pct": 0.004,     # ~205 pts sur DJ a 51000
+        "discount_premium_tol_pct": 0.08,
+        "min_displacement_atr": 1.0,
+        "swing_strength_m1": 3,
+        "min_distance_tp_pct": 0.001,
+        "min_score": 140,
+        "min_quality": 55,
+        "rr_max": 2.0,
+    },
+    "UK100": {
+        "parent_ob_tolerance_pct": 0.004,     # ~40 pts sur FTSE a 10000
+        "discount_premium_tol_pct": 0.08,
+        "min_displacement_atr": 1.0,
+        "swing_strength_m1": 3,
+        "min_distance_tp_pct": 0.001,
+        "min_score": 140,
+        "min_quality": 55,
+        "rr_max": 2.0,
+    },
+    "FRA40": {
+        "parent_ob_tolerance_pct": 0.004,     # ~33 pts sur CAC a 8200
+        "discount_premium_tol_pct": 0.08,
+        "min_displacement_atr": 1.0,
+        "swing_strength_m1": 3,
+        "min_distance_tp_pct": 0.001,
+        "min_score": 140,
+        "min_quality": 55,
+        "rr_max": 2.0,
+    },
+    "USDCAD": {
+        "parent_ob_tolerance_pct": 0.0030,
+        "discount_premium_tol_pct": 0.20,
+        "min_displacement_atr": 0.7,
+        "swing_strength_m1": 2,
+        "min_distance_tp_pct": 0.0003,
+        "is_forex": True,
+        "allow_against_daily_bias": True,
+        "min_score": 140,
+        "min_quality": 55,
+    },
+    "USDCHF": {
+        "parent_ob_tolerance_pct": 0.0030,
+        "discount_premium_tol_pct": 0.20,
+        "min_displacement_atr": 0.7,
+        "swing_strength_m1": 2,
+        "min_distance_tp_pct": 0.0003,
+        "is_forex": True,
+        "allow_against_daily_bias": True,
+        "min_score": 140,
         "min_quality": 55,
     },
 }

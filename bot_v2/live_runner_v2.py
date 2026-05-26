@@ -38,13 +38,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# === V10 (2026-05-22) : aligne le live sur le training V10 ===
-# Le dataset/modeles V10 ont ete construits avec swing_strength=1 (+88% d'OB)
-# et RR=1.5. Le live DOIT utiliser les memes valeurs sinon il voit des OB
-# differents et des SL/TP differents -> divergence training/live.
-# On force les env vars AVANT l'import de bot_v2.config.
-os.environ.setdefault("SWS_OVERRIDE", "1")
-os.environ.setdefault("RR_OVERRIDE", "1.5")
+# === V15 FIX (2026-05-25) : retire les overrides SWS/RR ===
+# AVANT : le live forcait SWS_OVERRIDE=1 + RR_OVERRIDE=1.5 (heritage V10).
+# Probleme : run_v15_parallel.py NE FORCE PAS ces env vars -> le build V15
+# utilise les valeurs par defaut (SWS par actif 2-3, RR par defaut).
+# Resultat : le ML V15 etait entraine sur des OB DIFFERENTS du live.
+# Audit subagent 2026-05-25 a identifie ca comme CRITIQUE (DIV #9 et #10).
+# Decision : retirer les overrides cote live, aligner sur les defaults config.
+# Build est la source de verite.
+# os.environ.setdefault("SWS_OVERRIDE", "1")    # RETIRE pour V15+
+# os.environ.setdefault("RR_OVERRIDE", "1.5")   # RETIRE pour V15+
 
 # Dashboard Railway : URL par defaut si non fournie par l'environnement.
 # Avant : le bot dependait de DASHBOARD_URL dans l'env du terminal -> si lance
@@ -114,9 +117,26 @@ THRESHOLD_SAFE_MODE = 5000.0
 # V10.2 (2026-05-22) : user descend le risque a 2% le temps de valider le WR
 # en live (au lieu de 5%). Permet d'observer un volume de trades sans risquer
 # trop d'argent. Remonter quand le WR live est confirme (~50 trades min).
-RISK_PCT_AGGRESSIVE = 0.02    # 2% par trade (TEST live, avant : 5%)
-RISK_PCT_SAFE = 0.02           # 2% au-dessus de 5000€ aussi
-RISK_PCT_TEST = 0.02
+# V14 PROD (2026-05-25) : risk descendu a 0.5% pour mode observation prolonge.
+# User feedback : "il faut juste voir si le bot fait ce qu'il doit" -> risk minimal
+# tant qu'on collecte les stats de WR live.
+# V17 (user 2026-05-25) : demo Vantage down -> bascule LIVE avec 3% de risque.
+RISK_PCT_AGGRESSIVE = 0.03    # 3% par trade (LIVE V17, user 2026-05-25)
+RISK_PCT_SAFE = 0.03          # 3% aussi au-dessus de 5000
+RISK_PCT_TEST = 0.03          # 3% meme sur petit compte
+
+# Mode DEMO (user 2026-05-25) : 5% risque + 14 actifs (memes que LIVE).
+# Update user 2026-05-25 : 14 actifs en demo pour tester V15 sur tout l'univers.
+RISK_PCT_DEMO = 0.05            # 5% en demo (test agressif sans risque reel)
+# UK100 retire en demo (user 2026-05-25) : symbole non dispo chez Vantage demo.
+DEMO_ASSETS = [
+    "XAUUSD", "NAS100", "GER40", "BTCUSD",
+    "EURUSD", "GBPUSD", "AUDUSD", "USDJPY",
+    "SP500", "DJ30", "FRA40",
+    "USDCAD", "USDCHF",
+]
+# Cache du mode (demo ou non), set au boot apres MT5 init
+_IS_DEMO: bool | None = None
 
 # Magic number (identifie nos trades dans MT5)
 BOT_MAGIC = 20260517
@@ -138,7 +158,9 @@ BOT_MAGIC = 20260517
 #   - 58 autres features : <= 240 bougies = 4h max
 # Gain compute par actif : ~1.7s -> ~0.2s (90% reduction).
 # Bot 14 actifs : 9s/cycle -> ~1-2s sur PC, 17s -> ~3s sur VPS.
-N_BARS_M1 = 8000     # V13 : 5.5j de marge
+N_BARS_M1 = 500      # V15 FIX (user 2026-05-25) : 5h M1 suffit (max lookback
+                     # M1 = 240 = mom_240 4h). atr_regime regarde KZ -> M15.
+                     # Avant : 14400 = 14400 lignes a copier+pickler/cycle/actif
 N_BARS_M15 = 11000   # = chunk + buffer 4 mois training
 N_BARS_H1 = 2800     # = chunk + buffer 4 mois training
 N_BARS_D1 = 120      # = chunk + buffer 4 mois training
@@ -190,6 +212,10 @@ def _cleanup_proba_history(now: pd.Timestamp, max_age_min: int = 30) -> None:
 
 
 def get_risk_pct(balance: float) -> float:
+    # Mode DEMO : 5% (test agressif sans risque). Detection via _IS_DEMO global
+    # set au boot apres MT5 init (cf run_live()).
+    if _IS_DEMO is True:
+        return RISK_PCT_DEMO
     if balance < TEST_MODE_THRESHOLD:
         return RISK_PCT_TEST
     if balance < THRESHOLD_SAFE_MODE:
@@ -202,10 +228,15 @@ def get_active_assets(balance: float) -> list[str]:
 
     Override : LIVE_ASSETS_OVERRIDE="BTCUSD,EURUSD" force la liste (ex: test
     weekend BTCUSD seul, ou debug 1 actif). Ignore le mode test si defini.
+
+    Mode DEMO (user 2026-05-25) : forex only (6 paires majeures), evite
+    XAU/BTC/indices car symboles different entre demo et live broker (+).
     """
     _override = os.environ.get("LIVE_ASSETS_OVERRIDE", "").strip()
     if _override:
         return [a.strip() for a in _override.split(",") if a.strip()]
+    if _IS_DEMO is True:
+        return DEMO_ASSETS
     if balance < TEST_MODE_THRESHOLD:
         return TEST_MODE_ASSETS
     return LIVE_ASSETS
@@ -241,32 +272,13 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     if instrument in _models_cache:
         return _models_cache[instrument]
 
-    # Cascade : V14 > V13 > V12 > V11 > V10 > V9 > V8 > V7 > V5 > V4 > V3_5 > V2 legacy
+    # V17 ONLY (user 2026-05-25) : V17 = V16 + 13 fix critiques (parquets vrai UTC,
+    # retire leaks lookahead +3/+15 bougies futures, htf_bar complete, etc).
+    # V16 et anciens = obsoletes (timezone broker time + data leakage).
+    # V17 OOS : 12/14 PASS, WR @0.65 = ~75% honnete (vs V16 = 77% gonfle par leaks).
     candidates = [
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v14.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v14.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v13.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v13.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v12.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v12.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v11.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v11.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v10.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v10.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v9.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v9.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v8.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v8.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v7.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v7.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v5.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_admiral_v5.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v4.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_admiral_v4.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}_admiral_v3_5.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}_admiral_v3_5.json"),
-        (BOT_V2_DIR / f"ml_model_{instrument}.pkl",
-         BOT_V2_DIR / f"ml_features_{instrument}.json"),
+        (BOT_V2_DIR / f"ml_model_{instrument}_vantage_v17.pkl",
+         BOT_V2_DIR / f"ml_features_{instrument}_vantage_v17.json"),
     ]
     model_path = feat_path = None
     version = None
@@ -274,44 +286,21 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
         if mp.exists() and fp.exists():
             model_path = mp
             feat_path = fp
-            if "_vantage_v14" in mp.name:
-                version = "V14-Vantage-OBNoBOS-Mitigation"
-            elif "_vantage_v13" in mp.name:
-                version = "V13-Vantage-AtrRegimePerKZ"
-            elif "_vantage_v12" in mp.name:
-                version = "V12-Vantage-PureAmont-NoLeakage"
-            elif "_vantage_v11" in mp.name:
-                version = "V11-Vantage-RealisticTraining"
-            elif "_vantage_v10" in mp.name:
-                version = "V10-Vantage-MoreVolume"
-            elif "_vantage_v9" in mp.name:
-                version = "V9-Vantage-NoLeakage-FULL"
-            elif "_vantage_v8" in mp.name:
-                version = "V8-Vantage-PartialFix"
-            elif "_vantage_v7" in mp.name:
-                version = "V7-Vantage-8ans"
-            elif "_v5" in mp.name:
-                version = "V5-Admiral"
-            elif "_v4" in mp.name:
-                version = "V4"
-            elif "_v3_5" in mp.name:
-                version = "V3.5"
-            else:
-                version = "V2-legacy"
+            version = "V17-Honest-NoLeak-UTC"
             break
 
     if model_path is None:
-        log.warning(f"Modele manquant pour {instrument} (V4/V3.5/V2 tous absents), skip")
+        log.warning(f"Modele V17 manquant pour {instrument} (rebuild requis), skip cet actif")
         return None
 
     log.info(f"Modele {instrument} : {version} ({model_path.name})")
     # V14 (2026-05-25) : si on charge un modele V14, force la detection OB en mode
     # "mitigation" (sans BOS) pour aligner live <-> training. Sinon le live detecte
     # des OB avec BOS et le ML V14 les voit dans un contexte qu'il n'a jamais appris.
-    if "_vantage_v14" in model_path.name:
+    if "_vantage_v14" in model_path.name or "_vantage_v15" in model_path.name or "_vantage_v16" in model_path.name or "_vantage_v17" in model_path.name:
         if os.environ.get("OB_VALIDATION_MODE") != "mitigation":
             os.environ["OB_VALIDATION_MODE"] = "mitigation"
-            log.info(f"  V14 detecte -> OB_VALIDATION_MODE = mitigation (alignement live/training)")
+            log.info(f"  V14/V15/V16/V17 detecte -> OB_VALIDATION_MODE = mitigation (alignement live/training)")
     with open(model_path, "rb") as f:
         model = pickle.load(f)
     features = json.load(open(feat_path))["features"]
@@ -319,10 +308,10 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     return model, features
 
 
-def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, mss_setups=None) -> float:
+def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, mss_setups=None, df_htf=None) -> float:
     # FIX V5.1 (2026-05-20) : passer mss_setups pour la feature has_mss_nearby.
     # Sans ca, has_mss_nearby=0 toujours -> ML proba chute ~0.20 -> bot ne trade jamais.
-    feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups)
+    feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups, df_htf=df_htf)
     # V11 : si le modele utilise snapshot_k (training realiste), on le remplit
     # avec l'age REEL de l'OB en bougies M1 (capper aux valeurs du training).
     if "snapshot_k" in features and df_ltf is not None and ob.validation_index is not None:
@@ -424,13 +413,16 @@ def fetch_payload(
         df_m1 = mt5_exec.get_bars(instrument, "M1", N_BARS_M1, force_sync=True)
         if df_m1 is None or len(df_m1) < 200:
             return None
-        df_m1 = df_m1.iloc[:-1]
+        # V15 FIX (DIV L) : get_bars utilise copy_rates_from_pos(pos=1) -> deja
+        # sans bougie en cours. iloc[:-1] etait redondant et retirait 1 vraie
+        # bougie -> 1 min de retard sur la detection OB.
+        # df_m1 = df_m1.iloc[:-1]  # RETIRE
         df_m15 = mt5_exec.get_bars(instrument, "M15", N_BARS_M15)
         df_h1 = mt5_exec.get_bars(instrument, "H1", N_BARS_H1)
         if df_m15 is None or df_h1 is None:
             return None
-        df_m15 = df_m15.iloc[:-1]
-        df_h1 = df_h1.iloc[:-1]
+        # df_m15 = df_m15.iloc[:-1]  # RETIRE (idem)
+        # df_h1 = df_h1.iloc[:-1]    # RETIRE (idem)
         try:
             df_d1 = mt5_exec.get_bars(instrument, "D1", N_BARS_D1)
             if df_d1 is None or len(df_d1) < 10:
@@ -448,7 +440,10 @@ def fetch_payload(
         df_m1 = buffer.get_m1(n=N_BARS_M1)
         if df_m1 is None or len(df_m1) < 200:
             return None
-        df_m1 = df_m1.iloc[:-1]
+        # V15 FIX (DIV L) : buffer.update() utilise copy_rates_from_pos(pos=1)
+        # qui exclut deja la bougie en cours. iloc[:-1] retirait 1 vraie bougie
+        # -> 1 min de retard sur detection OB. RETIRE.
+        # df_m1 = df_m1.iloc[:-1]
         df_m15 = buffer.get_m15(n=N_BARS_M15)
         df_h1 = buffer.get_h1(n=N_BARS_H1)
         df_h4 = buffer.get_h4(n=500)
@@ -580,23 +575,27 @@ def compute_asset(payload: dict) -> dict:
         # un OB qui n'a pas fill en 30min (NO_FILL). Au-dela, mouvement consomme,
         # contexte change -> SL frequents (cf 9 LOSS / 12 trades du 22/05).
         now = df_m1.index[-1]
-        recent_cutoff = now - pd.Timedelta(minutes=30)
+        # V15 FIX (2026-05-25, user) : PAS DE TIMER. On ne scanne QUE les OB
+        # dont la validation == derniere bougie (ou la precedente, tolerance 1
+        # bougie en cas de cycle rate). Le filtre evaluated_keys garantit ensuite
+        # qu'un OB n'est evalue qu'une seule fois.
+        # Logique pure : "3 bougies baissieres + bougie haussiere qui comble"
+        # = nouvel OB -> 1 calcul ML -> decision. Pas de rattrapage retroactif
+        # des OB anciens.
+        _tol_cutoff = now - pd.Timedelta(minutes=1)
         obs_recent = [
             ob for ob in obs_confirmed
-            if df_m1.index[ob.validation_index] >= recent_cutoff
+            if ob.validation_index is not None
+            and df_m1.index[ob.validation_index] >= _tol_cutoff
         ]
 
-        # NOTE (2026-05-21 soir) : le filtre "1 OB = 1 evaluation" etait
-        # CONTRE-PRODUCTIF. L'OOS evalue 1 fois par OB mais avec tout l'historique
-        # parquet disponible (donc des bougies POSTERIEURES a la validation, ce
-        # qui simule un OB "mur" avec son retest). Le live au moment de la
-        # validation n'a PAS ces bougies futures -> proba differente.
-        # Solution : on laisse le live re-evaluer l'OB a chaque cycle pendant
-        # recent_cutoff=60min. La proba grimpe au fil des bougies (retest,
-        # displacement) -> rejoint la proba OOS au bout de quelques minutes.
-        # Le dedoublonnage des TRADES PLACES est gere ailleurs via _seen_setups.
-        # _evaluated_obs n'est plus utilise pour filtrer (mais on continue de
-        # le maintenir pour des stats / audit eventuel).
+        # V15 FIX (2026-05-25) : 1 OB = 1 EVALUATION (regle dure user).
+        # Le filtrage se fait dans la boucle ci-dessous via evaluated_keys du
+        # payload (set des ts d'OB deja vus). En V12+ (PUR AMONT), le ML
+        # n'utilise QUE le passe de l'OB a la validation, donc une seule
+        # evaluation a la bougie de validation suffit. Re-evaluer faisait
+        # grimper la proba au fil des bougies futures (ML voit le "futur" =
+        # divergence par rapport au training amont) -> setup pris en retard.
 
         if debug_diag:
             from bot_v2.concepts.killzones import killzone_at
@@ -689,7 +688,27 @@ def compute_asset(payload: dict) -> dict:
         # c'est un modele V12 -> evaluation strictement amont (cache filtre a vi).
         is_v12 = "snapshot_k" not in features
         sws_ltf = get_param(instrument, "swing_strength_m1", 2)
+        # V15 FIX (2026-05-25) : 1 OB = 1 EVALUATION STRICTE.
+        # Regle dure user : un OB est calcule UNE SEULE FOIS, a la bougie ou il
+        # est comble (validation_index). Pas avant, pas apres. Sinon la proba
+        # ML grimpe au fil des bougies post-validation (le ML voit du "futur"
+        # par rapport au training amont) -> setup pris en retard.
+        _evaluated_keys = payload.get("evaluated_keys", set())
+        # V15 FIX (DIV #2, 2026-05-25) : filtre killzone OBLIGATOIRE.
+        # Le build V15 ne genere des setups QUE en killzone. Si on envoie au ML
+        # un OB hors KZ, le ML extrapole (proba indefinie, souvent elevee par
+        # hasard) -> trades aberrants. Alignement strict build/live.
+        from bot_v2.concepts.killzones import killzone_at as _kz_at
         for ob in obs_recent:
+            # Skip si deja evalue lors d'un cycle precedent (1 OB = 1 proba ML).
+            if ob.validation_index is not None:
+                _ob_ts_str = str(df_m1.index[ob.validation_index])
+                if _ob_ts_str in _evaluated_keys:
+                    continue
+                # Skip hors killzone (aligne build V15).
+                if _kz_at(df_m1.index[ob.validation_index]) is None:
+                    diag_reasons["hors_killzone"] = diag_reasons.get("hors_killzone", 0) + 1
+                    continue
             # En V12 : tronque df_m1 et le cache a la bougie de validation (vi),
             # exactement comme le build V12. Ainsi le ML voit les memes features
             # qu'en training -> zero divergence training/live.
@@ -708,7 +727,15 @@ def compute_asset(payload: dict) -> dict:
                                         if sb.break_index <= cut],
                     "obs_htf":         cache.get("obs_htf"),
                     "obs_htf2":        cache.get("obs_htf2"),
-                    "htf_trend":       cache.get("htf_trend"),
+                    # V15 FIX DIV M : recalcule htf_trend sur swings tronques
+                    # (sinon le live voit htf_trend calcule sur tous les swings,
+                    # incluant des swings post-validation -> data leakage).
+                    # Build fait `detect_trend(swings_K, lookback=6)` a chaque K.
+                    "htf_trend":       detect_trend(
+                        [s for s in cache.get("swings_ltf", [])
+                         if s.index + sws_ltf + 1 <= cut],
+                        lookback=6,
+                    ) if cache.get("swings_ltf") else cache.get("htf_trend"),
                 }
                 mss_eval = [m for m in (mss_setups or [])
                             if m.retest_index is not None and m.retest_index <= cut]
@@ -766,9 +793,16 @@ def compute_asset(payload: dict) -> dict:
                 diag_reasons[reason] = diag_reasons.get(reason, 0) + 1
                 continue
 
+            # V15 FIX (DIV #1, 2026-05-25) : passer df_m1_eval et mss_eval
+            # (tronques a vi+1) au lieu de df_m1/mss_setups full. En PUR AMONT
+            # (V12+), le ML ne doit JAMAIS voir de bougies post-validation.
+            # V15.1 : on passe df_m15 (avec son historique complet : pas de
+            # truncation a vi+1 cote HTF, c'est M15, granularite 15min, le
+            # buffer est largement plus large que les besoins atr_regime).
             proba = predict_proba(
                 model, features, r, ob, instrument,
-                df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups,
+                df_ltf=df_m1_eval, df_d1=df_d1, mss_setups=mss_eval,
+                df_htf=df_m15,
             )
             diag_ml_probas.append(proba)
             if proba < threshold:
@@ -953,13 +987,14 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # Le ML decide via feature has_mss_nearby (aligne avec V5 training).
     obs_confirmed = obs
 
-    # 3. Filtre : OB des 30 dernieres minutes.
-    # FIX V11.2 (2026-05-22) : passe de 60min a 30min (aligne OOS).
-    # Le OOS abandonne un OB non-fill en 30min. Le live faisait pareil
-    # apres validation -> 0 trade en live vs ~23/jour en backtest.
+    # V15 FIX (2026-05-25, user) : PAS DE TIMER. Scan UNIQUEMENT les OB dont
+    # la validation == derniere bougie fermee. Logique pure ICT/SMC.
     now = df_m1.index[-1]
-    recent_cutoff = now - pd.Timedelta(minutes=30)
-    obs_recent = [ob for ob in obs_confirmed if df_m1.index[ob.validation_index] >= recent_cutoff]
+    obs_recent = [
+        ob for ob in obs_confirmed
+        if ob.validation_index is not None
+        and df_m1.index[ob.validation_index] == now
+    ]
 
     if debug_diag:
         from bot_v2.concepts.killzones import killzone_at
@@ -1037,7 +1072,13 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     valid_setups = []
     diag_reasons: dict[str, int] = {}
     diag_ml_probas: list[float] = []  # toutes les probas ML calculees (rejet inclus)
+    from bot_v2.concepts.killzones import killzone_at as _kz_at
     for ob in obs_recent:
+        # V14-KZ (2026-05-25) : skip les OB hors killzone (aligne build).
+        # Le ML n'a ete entraine QUE sur des setups en KZ. Hors KZ = jamais trade.
+        if _kz_at(df_m1.index[ob.validation_index]) is None:
+            diag_reasons["hors_killzone"] = diag_reasons.get("hors_killzone", 0) + 1
+            continue
         try:
             r = evaluate_ob(
                 ob, df_m1, df_m15, df_d1, instrument,
@@ -1068,6 +1109,11 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
                               ml_proba=proba, score=r.score)
             diag_reasons[f"ml_below_{threshold:.2f}"] = diag_reasons.get(f"ml_below_{threshold:.2f}", 0) + 1
             continue
+
+        # V14 (2026-05-25) : filtre score retire apres observation
+        # (sample trop petit + le ML deja integre le score, imp 3.7%).
+        # User feedback : "DJ30 score 93 SL alors trade exemplaire, BTC 134 skip
+        # car TP deja consomme". Le score n'est PAS un bon predicteur seul.
 
         # NB : le check de stabilite V11.1 se fait dans le MASTER (apres
         # agregation des workers ProcessPool), pas ici. Cf bloc "WAIT_STABILITY"
@@ -1201,12 +1247,21 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
 
         # Prix marche reel pour le calcul lots = bid pour SELL, ask pour BUY (= le
         # prix auquel MT5 va executer le MARKET dans ~quelques millisecondes).
+        # mt5.symbol_info_tick() retourne un NAMEDTUPLE (pas un dict), donc on
+        # accede via attributes (.ask / .bid), pas via cles.
         _tick_lots = mt5_exec.get_tick(instrument)
         if _tick_lots is not None:
-            if setup.direction == "bullish":
-                market_price_for_lots = float(_tick_lots["ask"])
-            else:
-                market_price_for_lots = float(_tick_lots["bid"])
+            try:
+                if setup.direction == "bullish":
+                    market_price_for_lots = float(_tick_lots.ask)
+                else:
+                    market_price_for_lots = float(_tick_lots.bid)
+            except AttributeError:
+                # Fallback si MT5 retournait un dict dans une autre version
+                if setup.direction == "bullish":
+                    market_price_for_lots = float(_tick_lots["ask"])
+                else:
+                    market_price_for_lots = float(_tick_lots["bid"])
         else:
             # Fallback tick indisponible : on utilise setup.entry_price (= comportement legacy)
             market_price_for_lots = entry_price
@@ -1336,12 +1391,13 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     try:
         tick = mt5_exec.get_tick(instrument)
         if tick is not None:
+            # tick = namedtuple MT5 (attributes), pas dict
             if setup.direction == "bullish":
-                market_price = float(tick["ask"])
+                market_price = float(tick.ask)
                 risk_reel = market_price - sl_price
                 reward_reel = tp_price - market_price
             else:
-                market_price = float(tick["bid"])
+                market_price = float(tick.bid)
                 risk_reel = sl_price - market_price
                 reward_reel = market_price - tp_price
             if risk_reel <= 0:
@@ -1565,7 +1621,7 @@ def boot_diagnostics(mt5_exec: MT5Executor, state: LiveState):
     from bot_v2.concepts.structure import detect_structure_breaks
 
     issues = []
-    for asset in LIVE_ASSETS:
+    for asset in (DEMO_ASSETS if _IS_DEMO else LIVE_ASSETS):
         broker_sym = to_broker_symbol(asset)
         # Tick
         tick = mt5_exec.get_tick(asset)
@@ -1650,7 +1706,7 @@ def simulate_last_24h(mt5_exec: MT5Executor):
     total_passed = 0
     all_trades = []
 
-    for asset in LIVE_ASSETS:
+    for asset in (DEMO_ASSETS if _IS_DEMO else LIVE_ASSETS):
         # Fetch 1500 bougies M1 = 25h (couvre les 24h)
         df_m1 = mt5_exec.get_bars(asset, "M1", 1500)
         if df_m1 is None or len(df_m1) < 200:
@@ -1845,7 +1901,7 @@ def debug_last_hour(mt5_exec: MT5Executor):
     valid_setups_all = []
     cutoff_tests = [1, 2, 3, 5, 10, 15]
 
-    for asset in LIVE_ASSETS:
+    for asset in (DEMO_ASSETS if _IS_DEMO else LIVE_ASSETS):
         df_m1 = mt5_exec.get_bars(asset, "M1", 1500, force_sync=True)
         if df_m1 is None or len(df_m1) < 200:
             continue
@@ -2046,6 +2102,20 @@ def run_live(test_dry_run: bool = False):
         return
 
     log.info(f"Connecte au compte {mt5_exec.account_info.login} sur {mt5_exec.account_info.server}")
+    # Detection mode DEMO (user 2026-05-25) : trade_mode 0=demo, 1=contest, 2=real.
+    # En demo : RISK_PCT_DEMO (5%) + DEMO_ASSETS (forex only).
+    global _IS_DEMO
+    try:
+        _trade_mode = int(getattr(mt5_exec.account_info, "trade_mode", 2))
+        _IS_DEMO = (_trade_mode != 2)
+        if _IS_DEMO:
+            log.info(f"** MODE DEMO detecte (trade_mode={_trade_mode}) -> RISK=5%, "
+                     f"actifs={DEMO_ASSETS} **")
+        else:
+            log.info(f"Mode LIVE (trade_mode={_trade_mode}) -> config standard")
+    except Exception as _e:
+        log.warning(f"Detection demo/live failed : {_e} (fallback live)")
+        _IS_DEMO = False
     cash_real = mt5_exec.get_balance()
     log.info(f"Cash reel : {cash_real:.2f} {mt5_exec.account_info.currency} + bonus 50€ = base calcul {cash_real + 50:.2f}€")
     if test_dry_run:
@@ -2063,9 +2133,11 @@ def run_live(test_dry_run: bool = False):
     log.info("=" * 70)
     log.info("INIT DATA BUFFERS (charge 7mois historique + comble trou via MT5)")
     log.info("=" * 70)
-    _buffer_assets = list(LIVE_ASSETS)
+    # En demo on charge que les 6 forex (pas 14 actifs dont XAU/BTC/indices).
+    _assets_for_init = DEMO_ASSETS if _IS_DEMO else LIVE_ASSETS
+    _buffer_assets = list(_assets_for_init)
     # Ajoute les correles SMT (XAGUSD, DXY, SPX500) si presents
-    for asset in LIVE_ASSETS:
+    for asset in _assets_for_init:
         for corr_name, _ in SMT_PAIRS.get(asset, []):
             if corr_name not in _buffer_assets:
                 _buffer_assets.append(corr_name)
@@ -2086,10 +2158,13 @@ def run_live(test_dry_run: bool = False):
     # AVANT la creation du ProcessPool. Sinon les workers heritent du defaut "bos"
     # et detectent les OB en mode BOS au lieu de mitigation -> mismatch ML V14
     # entraine sur dataset mitigation. Symptome : bars_latency 10-20 au lieu de 0-2.
-    if any(BOT_V2_DIR.glob("ml_model_*_vantage_v14.pkl")):
+    if (any(BOT_V2_DIR.glob("ml_model_*_vantage_v14.pkl"))
+            or any(BOT_V2_DIR.glob("ml_model_*_vantage_v15.pkl"))
+            or any(BOT_V2_DIR.glob("ml_model_*_vantage_v16.pkl"))
+            or any(BOT_V2_DIR.glob("ml_model_*_vantage_v17.pkl"))):
         if os.environ.get("OB_VALIDATION_MODE") != "mitigation":
             os.environ["OB_VALIDATION_MODE"] = "mitigation"
-            log.info("V14 detecte au boot -> OB_VALIDATION_MODE=mitigation (avant spawn workers)")
+            log.info("V14/V15/V16/V17 detecte au boot -> OB_VALIDATION_MODE=mitigation (avant spawn workers)")
 
     # === V5.7 (2026-05-21) : ProcessPool workers pour scan parallele ===
     # Cree UNE fois (workers persistents) -> _models_cache reste chaud entre

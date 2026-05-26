@@ -100,7 +100,9 @@ def detect_order_blocks(
     if swings is None:
         swings = find_swings(df, strength=swing_strength)
     if sweeps is None:
-        sweeps = find_sweeps(df, swings, min_depth_atr=min_sweep_depth_atr)
+        # V18.2 : min_sweep_depth optimisable via env var
+        _depth = float(os.environ.get("V18_MIN_SWEEP_DEPTH", str(min_sweep_depth_atr)))
+        sweeps = find_sweeps(df, swings, min_depth_atr=_depth)
 
     # Si l'appelant n'a pas force le mode, on lit l'env var globale a CHAQUE appel
     # (defaut "bos" = comportement V13). Lu dynamiquement pour que load_model V14
@@ -173,6 +175,137 @@ def _try_bullish_ob(
     closes = df["close"].values
 
     sweep_idx = sweep.sweep_index
+
+    # ===== V19 ICT PUR (ICT 2024, version "cluster" = ensemble de bougies) =====
+    # Definition ICT pratique (cf Soufiane + sources ICT secondaires) :
+    #   OB BULLISH = SERIE de bougies BAISSIERES consecutives avant impulsion haussiere.
+    #   Les "last bearish candle OR series of candles before a significant bullish move".
+    #
+    # Validation ICT "engulfing in 1 candle" (LA difference cle vs V18) :
+    #   La bougie SUIVANTE doit en UNE SEULE bougie :
+    #   - sweep : low descend SOUS le low du groupe (mèches incluses)
+    #   - engulf : close cloture > high CORPS du groupe (max(open,close))
+    #   - etre HAUSSIERE (close > open)
+    #
+    # Bornes ICT : CORPS uniquement (cohorent avec engulf body-to-body)
+    #   ob_high = MAX(open, close) sur tout le groupe
+    #   ob_low  = MIN(open, close) sur tout le groupe
+    #
+    # Difference cle vs V18 :
+    #   V18 : validation par close > ob_high APRES N bougies, rejection si meche < ob_low
+    #   V19 : validation par close > ob_high EN UNE BOUGIE (la bougie d'engulf = sweep_idx)
+    if validation_mode == "v19_ict":
+        engulf_idx = sweep_idx
+        # La bougie d'engulf doit etre HAUSSIERE
+        if closes[engulf_idx] <= opens[engulf_idx]:
+            return None
+        # Trouve le GROUPE de baissieres consecutives strictement AVANT engulf_idx
+        # (la derniere baissiere doit etre a engulf_idx - 1)
+        if engulf_idx - 1 < 0:
+            return None
+        if closes[engulf_idx - 1] >= opens[engulf_idx - 1]:
+            return None  # pas de baissiere juste avant -> pas d'OB
+        group_end = engulf_idx - 1
+        group_start = group_end
+        while group_start > 0 and closes[group_start - 1] < opens[group_start - 1]:
+            group_start -= 1
+        group_size = group_end - group_start + 1
+        # min 1 bougie pour ICT (a la difference de V18 qui exige 2)
+        if group_size < 1:
+            return None
+        # Bornes ICT cluster (corps uniquement)
+        ob_high_ict = float(max(
+            max(opens[i], closes[i]) for i in range(group_start, group_end + 1)
+        ))
+        ob_low_ict = float(min(
+            min(opens[i], closes[i]) for i in range(group_start, group_end + 1)
+        ))
+        if ob_high_ict <= ob_low_ict:
+            return None
+        # CHECK 1 : sweep — low[engulf] doit descendre sous low_corps_min (ou meche du groupe)
+        # On utilise low du groupe (meches incluses) pour le sweep ICT classique
+        group_low_wick = float(min(lows[i] for i in range(group_start, group_end + 1)))
+        if lows[engulf_idx] >= group_low_wick:
+            return None
+        # CHECK 2 : engulf — close[engulf] > ob_high (max corps)
+        if closes[engulf_idx] <= ob_high_ict:
+            return None
+        return OrderBlock(
+            direction="bullish",
+            group_start_index=int(group_start),
+            group_end_index=int(group_end),
+            group_start_ts=df.index[group_start],
+            group_end_ts=df.index[group_end],
+            ob_high=ob_high_ict,
+            ob_low=ob_low_ict,
+            ob_open=float(opens[group_start]),
+            ob_close=float(closes[group_end]),
+            validation_index=int(engulf_idx),
+            validation_ts=df.index[engulf_idx],
+            validation_close=float(closes[engulf_idx]),
+            sweep=sweep,
+            group_size=int(group_size),
+        )
+
+    # ===== V18 STRICT MODE (Soufiane 2026-05-26 + ajustements V18.1 2026-05-27) =====
+    # Sweep bullish -> bougie de sweep DOIT etre baissiere, sinon PAS d'OB
+    # V18.1 : min_group=1 (au lieu de 2) pour capturer + d'OB ICT classiques
+    # max_group=illimite, bornes mecheSweep/maxCorps, validation close > ob_high,
+    # rejection si meche < ob_low pendant le pending.
+    if validation_mode == "v18":
+        # Etape 1 : bougie de sweep doit etre BAISSIERE
+        if closes[sweep_idx] >= opens[sweep_idx]:
+            return None
+        # Etape 2 : groupe = sweep + baissieres consecutives juste avant (pas de max)
+        group_end = sweep_idx
+        group_start = group_end
+        while group_start > 0 and closes[group_start - 1] < opens[group_start - 1]:
+            group_start -= 1
+        group_size = group_end - group_start + 1
+        # V18.1 : min_group=1 (etait 2). Permet OB ICT "1 derniere bougie baissiere"
+        if group_size < 1:
+            return None
+        # Etape 3 : bornes V18
+        # ob_low = low de la meche du sweep (meche INCLUSE en bas)
+        ob_low_v18 = float(lows[sweep_idx])
+        # ob_high = max(open, close) du groupe (corps uniquement, meches haut EXCLUES)
+        ob_high_v18 = float(max(
+            max(opens[i], closes[i]) for i in range(group_start, group_end + 1)
+        ))
+        if ob_high_v18 <= ob_low_v18:
+            return None
+        # Etape 4-5 : pending + validation + rejection
+        # V18 : Soufiane = pending indefini. On override max_bars_after_sweep en boucle
+        # jusqu'a fin du df (ou trouve validation/rejection en chemin).
+        val_end = len(df)
+        validation_idx = None
+        for j in range(sweep_idx + 1, val_end):
+            # Rejection (priorite) : meche < ob_low -> OB mort
+            if lows[j] < ob_low_v18:
+                return None
+            # Validation : close > ob_high
+            if closes[j] > ob_high_v18:
+                validation_idx = j
+                break
+        if validation_idx is None:
+            return None
+        # Construction OrderBlock V18 (ob_high/ob_low V18, autres champs cohorents)
+        return OrderBlock(
+            direction="bullish",
+            group_start_index=int(group_start),
+            group_end_index=int(group_end),
+            group_start_ts=df.index[group_start],
+            group_end_ts=df.index[group_end],
+            ob_high=ob_high_v18,  # V18 : max corps
+            ob_low=ob_low_v18,    # V18 : meche sweep
+            ob_open=float(opens[group_start]),
+            ob_close=float(closes[group_end]),
+            validation_index=int(validation_idx),
+            validation_ts=df.index[validation_idx],
+            validation_close=float(closes[validation_idx]),
+            sweep=sweep,
+            group_size=int(group_size),
+        )
 
     # 1. Trouver le GROUPE baissier qui se termine a (ou juste avant) sweep_idx
     # On remonte depuis sweep_idx tant que les bougies sont baissieres.
@@ -255,6 +388,115 @@ def _try_bearish_ob(
     closes = df["close"].values
 
     sweep_idx = sweep.sweep_index
+
+    # ===== V19 ICT BEARISH (symetrique cluster) =====
+    # OB BEARISH = SERIE de bougies HAUSSIERES consecutives avant impulsion baissiere.
+    # Validation ICT "engulfing in 1 candle" :
+    #   bougie SUIVANTE doit en UNE bougie :
+    #   - sweep : high > high_meches du groupe
+    #   - engulf : close < min(open,close) du groupe
+    #   - etre BAISSIERE
+    # Bornes : CORPS uniquement
+    if validation_mode == "v19_ict":
+        engulf_idx = sweep_idx
+        if closes[engulf_idx] >= opens[engulf_idx]:
+            return None  # engulf doit etre baissiere
+        if engulf_idx - 1 < 0:
+            return None
+        if closes[engulf_idx - 1] <= opens[engulf_idx - 1]:
+            return None  # pas de haussiere juste avant
+        group_end = engulf_idx - 1
+        group_start = group_end
+        while group_start > 0 and closes[group_start - 1] > opens[group_start - 1]:
+            group_start -= 1
+        group_size = group_end - group_start + 1
+        if group_size < 1:
+            return None
+        # Bornes corps
+        ob_high_ict = float(max(
+            max(opens[i], closes[i]) for i in range(group_start, group_end + 1)
+        ))
+        ob_low_ict = float(min(
+            min(opens[i], closes[i]) for i in range(group_start, group_end + 1)
+        ))
+        if ob_high_ict <= ob_low_ict:
+            return None
+        # CHECK 1 : sweep — high[engulf] > group_high_wick
+        group_high_wick = float(max(highs[i] for i in range(group_start, group_end + 1)))
+        if highs[engulf_idx] <= group_high_wick:
+            return None
+        # CHECK 2 : engulf — close[engulf] < ob_low
+        if closes[engulf_idx] >= ob_low_ict:
+            return None
+        return OrderBlock(
+            direction="bearish",
+            group_start_index=int(group_start),
+            group_end_index=int(group_end),
+            group_start_ts=df.index[group_start],
+            group_end_ts=df.index[group_end],
+            ob_high=ob_high_ict,
+            ob_low=ob_low_ict,
+            ob_open=float(opens[group_start]),
+            ob_close=float(closes[group_end]),
+            validation_index=int(engulf_idx),
+            validation_ts=df.index[engulf_idx],
+            validation_close=float(closes[engulf_idx]),
+            sweep=sweep,
+            group_size=int(group_size),
+        )
+
+    # ===== V18 STRICT MODE (Soufiane 2026-05-26 + V18.1 ajustements) =====
+    if validation_mode == "v18":
+        # Bougie de sweep doit etre HAUSSIERE
+        if closes[sweep_idx] <= opens[sweep_idx]:
+            return None
+        # Groupe = sweep + haussieres consecutives avant
+        group_end = sweep_idx
+        group_start = group_end
+        while group_start > 0 and closes[group_start - 1] > opens[group_start - 1]:
+            group_start -= 1
+        group_size = group_end - group_start + 1
+        # V18.1 : min_group=1
+        if group_size < 1:
+            return None
+        # Bornes V18 bearish
+        # ob_high = high de la meche du sweep (meche INCLUSE en haut)
+        ob_high_v18 = float(highs[sweep_idx])
+        # ob_low = min(open, close) du groupe (corps uniquement, meches bas EXCLUES)
+        ob_low_v18 = float(min(
+            min(opens[i], closes[i]) for i in range(group_start, group_end + 1)
+        ))
+        if ob_high_v18 <= ob_low_v18:
+            return None
+        # Pending + validation + rejection (V18 = indefini)
+        val_end = len(df)
+        validation_idx = None
+        for j in range(sweep_idx + 1, val_end):
+            # Rejection : meche > ob_high -> OB mort
+            if highs[j] > ob_high_v18:
+                return None
+            # Validation : close < ob_low
+            if closes[j] < ob_low_v18:
+                validation_idx = j
+                break
+        if validation_idx is None:
+            return None
+        return OrderBlock(
+            direction="bearish",
+            group_start_index=int(group_start),
+            group_end_index=int(group_end),
+            group_start_ts=df.index[group_start],
+            group_end_ts=df.index[group_end],
+            ob_high=ob_high_v18,  # V18 : meche sweep
+            ob_low=ob_low_v18,    # V18 : min corps
+            ob_open=float(opens[group_start]),
+            ob_close=float(closes[group_end]),
+            validation_index=int(validation_idx),
+            validation_ts=df.index[validation_idx],
+            validation_close=float(closes[validation_idx]),
+            sweep=sweep,
+            group_size=int(group_size),
+        )
 
     group_end = sweep_idx
     if closes[sweep_idx] <= opens[sweep_idx]:
@@ -351,9 +593,11 @@ def ob_stop_loss(ob: OrderBlock, df: 'pd.DataFrame | None' = None) -> float:
     if sweep_idx is None:
         sweep_idx = ob.group_start_index
 
-    # Fenetre : 5 bougies avant sweep -> validation_index (inclusif)
+    # Fenetre : N bougies avant sweep -> validation_index (inclusif)
     # Couvre group + bougies de manipulation entre group et validation
-    lookback_start = max(0, sweep_idx - SL_LOOKBACK_BARS)
+    # V18.2 : SL_LOOKBACK_BARS optimisable via env var
+    _sl_lookback = int(os.environ.get("V18_SL_LOOKBACK", str(SL_LOOKBACK_BARS)))
+    lookback_start = max(0, sweep_idx - _sl_lookback)
     end_idx = max(ob.group_end_index, ob.validation_index)
     sub = df.iloc[lookback_start:end_idx + 1]
     if len(sub) == 0:
@@ -362,9 +606,25 @@ def ob_stop_loss(ob: OrderBlock, df: 'pd.DataFrame | None' = None) -> float:
             return ob.ob_low
         return ob.ob_high
 
+    # V18.2 (Soufiane 2026-05-27) : padding SL adaptatif ATR.
+    # Justification : analyse forensique 474k trades V18.1 -> Q4 risk_points (large SL)
+    # WR=38.9% vs Q1 (serre) WR=35.4% (+3.4pts). SL trop serre = touche au bruit.
+    # Env var V18_SL_ATR_MULT=N => ajoute N x ATR au SL (defaut 0 = comportement V18.0).
+    sl_atr_mult = float(os.environ.get("V18_SL_ATR_MULT", "0"))
+    if sl_atr_mult > 0 and len(df) >= 20:
+        # ATR rapide M1 : moyenne range sur 14 dernieres bougies avant validation
+        atr_window = df.iloc[max(0, ob.validation_index - 14):ob.validation_index]
+        if len(atr_window) > 0:
+            atr = float((atr_window["high"] - atr_window["low"]).mean())
+            padding = atr * sl_atr_mult
+        else:
+            padding = 0
+    else:
+        padding = 0
+
     if ob.direction == "bullish":
-        return float(sub["low"].min())
-    return float(sub["high"].max())
+        return float(sub["low"].min()) - padding
+    return float(sub["high"].max()) + padding
 
 
 def ob_entry(ob: OrderBlock) -> float:

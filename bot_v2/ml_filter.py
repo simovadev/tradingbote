@@ -7,6 +7,7 @@ Decision user 2026-05-16 :
 from __future__ import annotations
 
 import json
+import math
 import pickle
 from pathlib import Path
 from typing import Any
@@ -71,27 +72,25 @@ _FEATURES_BY_INST_TF: dict[tuple[str, str], Path] = {
 #   @0.75 : 2 trades,  WR 100% (trop strict)
 # Avec V11.2 (cap age 30min aligne OOS), 0.70 donne le meilleur compromis
 # volume/WR. Conforme aux chiffres OOS V11 (WR ~81% au seuil 0.70).
-# V14 (2026-05-25) : seuil descendu 0.70 -> 0.60.
-# OOS V14 a seuil 0.60 : WR moyen 66.3% / 1169 trades sur 6 mois (~9/jour).
-# Expectancy theorique (RR=2) = +0.99R/trade vs +1.26R a 0.70.
-# Mais volume x3.2 -> total expectancy/jour +160% vs 0.70.
-# Avec RR reel V14 (~3 via EXEC pres SL), expectancy/trade = +1.65R.
-# Cf decision user 2026-05-25 apres analyse OOS V14 complete.
+# V16 (2026-05-25, user) : seuil 0.55 pour DOUBLER le volume.
+# OOS V16 : 0.55 = ~12 tr/jour WR ~71% vs 0.60 = ~7.5 tr/jour WR ~77%.
+# 0.55 gagne en R total/jour (+44%) malgre WR plus faible. Risque : plus de
+# drawdown (a 5% risk demo, attention aux SL consecutifs).
 ML_THRESHOLDS: dict[str, float] = {
-    "XAUUSD": 0.60,
-    "NAS100": 0.60,
-    "GER40":  0.60,
-    "BTCUSD": 0.60,
-    "EURUSD": 0.60,
-    "GBPUSD": 0.60,
-    "AUDUSD": 0.60,
-    "USDJPY": 0.60,
-    "SP500":  0.60,
-    "DJ30":   0.60,
-    "UK100":  0.60,
-    "FRA40":  0.60,
-    "USDCAD": 0.60,
-    "USDCHF": 0.60,
+    "XAUUSD": 0.55,
+    "NAS100": 0.55,
+    "GER40":  0.55,
+    "BTCUSD": 0.55,
+    "EURUSD": 0.55,
+    "GBPUSD": 0.55,
+    "AUDUSD": 0.55,
+    "USDJPY": 0.55,
+    "SP500":  0.55,
+    "DJ30":   0.55,
+    "UK100":  0.55,
+    "FRA40":  0.55,
+    "USDCAD": 0.55,
+    "USDCHF": 0.55,
 }
 # Seuil par (actif, TF) — surcharge ML_THRESHOLDS si present
 ML_THRESHOLDS_BY_INST_TF: dict[tuple[str, str], float] = {
@@ -205,21 +204,148 @@ _ATR_REGIME_V13_N_TYPICAL = 5
 # Fenetre courante pour le fallback hors KZ
 _ATR_REGIME_V13_FALLBACK_WIN = 60
 
+# V15.1 : version M15. 1 KZ ~= 8-16 M15. 5 KZ passees ~= 100 M15 + gaps weekends
+# (max ~500 M15 = 5 jours utiles). Cap dur a 1000 M15 (10j) pour edge cases.
+_ATR_REGIME_V15_MAX_LOOKBACK_M15 = 1000
+# Fenetre fallback hors KZ : 4 M15 (= 1h) au lieu de 60 M1
+_ATR_REGIME_V15_FALLBACK_WIN_M15 = 4
 
-def _compute_atr_regime_v13(df_ltf, idx, current_kz_name):
-    """ATR de la killzone courante / moyenne ATR des 5 dernieres MEMES KZ.
 
-    Retourne 1.0 (neutre) si pas assez d'historique ou erreur.
+def _compute_atr_regime_v15_htf(df_htf, ob_ts, current_kz_name):
+    """V15.1 : atr_regime calcule sur M15.
 
     Args:
-        df_ltf: DataFrame M1 avec colonnes high/low et index timestamp.
+        df_htf: DataFrame M15 (high/low + index UTC).
+        ob_ts: timestamp UTC de validation de l'OB.
+        current_kz_name: str ou None.
+
+    Returns:
+        float : ratio atr_now / atr_typical, ou 1.0.
+    """
+    if df_htf is None or len(df_htf) < 50:
+        return 1.0
+    try:
+        from bot_v2.concepts.killzones import killzone_at
+    except Exception:
+        return 1.0
+
+    # Index M15 <= ob_ts (strictement amont)
+    try:
+        ts_index = df_htf.index
+        end_idx = ts_index.searchsorted(ob_ts, side="right")  # nb M15 closes <= ob_ts
+        if end_idx < 20:
+            return 1.0
+        start_idx = max(0, end_idx - _ATR_REGIME_V15_MAX_LOOKBACK_M15)
+    except Exception:
+        return 1.0
+
+    highs = df_htf["high"].values
+    lows = df_htf["low"].values
+
+    # --- Cas 1 : on est dans une killzone connue ---
+    if current_kz_name is not None:
+        # ATR de la KZ courante : bougies M15 de la meme KZ, remontant tant qu'on y est
+        kz_start = end_idx
+        for j in range(end_idx - 1, max(end_idx - 16, start_idx) - 1, -1):
+            if killzone_at(ts_index[j]) == current_kz_name:
+                kz_start = j
+            else:
+                break
+        if kz_start >= end_idx:
+            return 1.0
+        atr_now = float((highs[kz_start:end_idx] - lows[kz_start:end_idx]).mean())
+        # V17 FIX-17 : NaN check (NaN <= 0 = False -> sinon retourne NaN sur slice vide)
+        import math
+        if atr_now <= 0 or not math.isfinite(atr_now):
+            return 1.0
+
+        # Collecter 5 dernieres KZ passees du meme nom
+        atr_history = []
+        cur_end = None
+        in_block = False
+        j = kz_start - 1
+        while j >= start_idx and len(atr_history) < _ATR_REGIME_V13_N_TYPICAL:
+            if killzone_at(ts_index[j]) == current_kz_name:
+                if not in_block:
+                    cur_end = j + 1
+                    in_block = True
+                j -= 1
+            else:
+                if in_block:
+                    blk_start = j + 1
+                    if cur_end - blk_start >= 2:  # min 2 M15 = 30min
+                        blk_atr = float((highs[blk_start:cur_end] - lows[blk_start:cur_end]).mean())
+                        if blk_atr > 0:
+                            atr_history.append(blk_atr)
+                    in_block = False
+                j -= 1
+        if in_block and cur_end is not None:
+            blk_start = max(j + 1, start_idx)
+            if cur_end - blk_start >= 2:
+                blk_atr = float((highs[blk_start:cur_end] - lows[blk_start:cur_end]).mean())
+                if blk_atr > 0:
+                    atr_history.append(blk_atr)
+
+        if not atr_history:
+            return 1.0
+        atr_typical = sum(atr_history) / len(atr_history)
+        return atr_now / atr_typical if atr_typical > 0 else 1.0
+
+    # --- Cas 2 : hors KZ -> fenetre 4 M15 (= 1h) vs meme heure les 5 derniers jours ---
+    win = _ATR_REGIME_V15_FALLBACK_WIN_M15
+    if end_idx < win:
+        return 1.0
+    atr_now = float((highs[end_idx - win:end_idx] - lows[end_idx - win:end_idx]).mean())
+    # V17 FIX-17 (idem) : NaN check
+    import math
+    if atr_now <= 0 or not math.isfinite(atr_now):
+        return 1.0
+
+    ts_now = ts_index[end_idx - 1]
+    atr_history = []
+    for d in range(1, _ATR_REGIME_V13_N_TYPICAL + 1):
+        ts_target = ts_now - pd.Timedelta(days=d)
+        try:
+            j = ts_index.searchsorted(ts_target, side="right")
+        except Exception:
+            continue
+        if j < win or j > end_idx:
+            continue
+        blk_atr = float((highs[j - win:j] - lows[j - win:j]).mean())
+        if blk_atr > 0:
+            atr_history.append(blk_atr)
+
+    if not atr_history:
+        return 1.0
+    atr_typical = sum(atr_history) / len(atr_history)
+    return atr_now / atr_typical if atr_typical > 0 else 1.0
+
+
+def _compute_atr_regime_v13(df_ltf, idx, current_kz_name, df_htf=None, ob_ts=None):
+    """ATR de la killzone courante / moyenne ATR des 5 dernieres MEMES KZ.
+
+    V15.1 (2026-05-25) : utilise df_htf (M15) si dispo (recommande).
+    M15 permet de couvrir 5 KZ passees avec ~500 bougies (= ~5 jours) au lieu
+    de ~7200 M1. Aligne build (df_htf complet, pas de truncation au chunk) et
+    live (df_htf via buffer N_BARS_M15=11000).
+
+    Fallback sur df_ltf (M1) si df_htf indisponible (ancien comportement).
+
+    Args:
+        df_ltf: DataFrame M1 avec high/low/index ts (fallback).
         idx: int, position de validation de l'OB dans df_ltf.
-        current_kz_name: nom de la killzone courante (str ou None).
-                         Si None : fallback fenetre 60 M1 a la meme heure UTC.
+        current_kz_name: nom de la killzone courante.
+        df_htf: DataFrame M15 (recommande) avec high/low/index ts.
+        ob_ts: timestamp UTC de la validation de l'OB (pour aligner sur df_htf).
 
     Returns:
         float : ratio atr_now / atr_typical, ou 1.0 si indeterminable.
     """
+    # V15.1 : preferentiel M15 si on a df_htf + ob_ts
+    if df_htf is not None and ob_ts is not None and len(df_htf) > 100:
+        return _compute_atr_regime_v15_htf(df_htf, ob_ts, current_kz_name)
+
+    # Fallback ancien comportement M1
     if df_ltf is None or idx is None or idx < 60:
         return 1.0
     try:
@@ -320,7 +446,7 @@ def _compute_atr_regime_v13(df_ltf, idx, current_kz_name):
     return atr_now / atr_typical if atr_typical > 0 else 1.0
 
 
-def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None) -> dict:
+def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None, df_htf=None) -> dict:
     """Reproduit EXACTEMENT les features V3.5/V4/V5 du dataset ML (ml_dataset.py _extract_features).
 
     FIX CRITIQUE 2026-05-20 : avant, 11 features etaient absentes en live (atr, dist_pdh,
@@ -336,9 +462,10 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
     conf_text = " ".join(conf)
 
     f = {
-        # Scores Vizion
-        "score": r.score,
-        "quality": r.quality.total_quality_score if r.quality else 0,
+        # V18.3 (Soufiane 2026-05-27 audit ML) :
+        # 'score' et 'quality' RETIRES = combinaisons lineaires des autres features
+        # → causent overfitting (train AUC 0.83 vs OOS 0.65 = gap +0.18)
+        # On garde les composants atomiques : ob_strength, sweep_strength, etc.
         "ob_strength": r.quality.ob_strength if r.quality else 0,
         "sweep_strength": r.quality.sweep_strength if r.quality else 0,
         "retest_count": r.quality.retest_count if r.quality else 0,
@@ -351,12 +478,13 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
         # Daily bias
         "daily_bias_aligned": int(r.daily_bias_ok is True),
         "daily_bias_neutral": int(r.daily_bias is not None and r.daily_bias.bias == "neutral"),
-        # Killzone one-hot
+        # Killzone one-hot (V15.1 : ajout London_Close ~17% des OB)
         "kz_london": int(r.killzone_name == "London"),
         "kz_ny_am": int(r.killzone_name == "NY_AM"),
         "kz_ny_pm": int(r.killzone_name == "NY_PM"),
         "kz_asia": int(r.killzone_name == "Asia"),
         "kz_ny_lunch": int(r.killzone_name == "NY_Lunch"),
+        "kz_london_close": int(r.killzone_name == "London_Close"),
         # Confluences
         "has_smt": int("smt_" in conf_text),
         "has_feu_vert": int("feu_vert" in conf_text),
@@ -373,16 +501,60 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
         "has_session_direction": int("session_sans_direction" not in conf_text),
         # OB structure
         "ob_group_size": ob.group_size,
-        "bars_sweep_to_validation": ob.validation_index - getattr(ob.sweep, "sweep_index", ob.group_start_index),
-        "bars_group_to_validation": ob.validation_index - ob.group_start_index,
+        # V15.1 FIX A13 : max(0, ...) car sweep_index peut etre > validation_index
+        # sur OB replayed/rejected -> evite valeurs negatives parasites.
+        "bars_sweep_to_validation": max(0, ob.validation_index - getattr(ob.sweep, "sweep_index", ob.group_start_index)),
+        "bars_group_to_validation": max(0, ob.validation_index - ob.group_start_index),
         "is_bullish": int(ob.direction == "bullish"),
     }
 
     # Features V3 (temps)
     ts = ob.validation_ts
     f["hour_of_day"] = int(ts.hour)
+    # BONUS 2 (2026-05-26) : encodage cyclique de l'heure. hour_of_day linaire
+    # traite 23h et 00h comme distantes alors qu'elles sont voisines. sin/cos
+    # encode la proximite circulaire. Garde hour_of_day pour compat / lisibilite.
+    _hour = int(ts.hour)
+    f["hour_sin"] = math.sin(2 * math.pi * _hour / 24)
+    f["hour_cos"] = math.cos(2 * math.pi * _hour / 24)
     f["day_of_week"] = int(ts.dayofweek)
-    f["minutes_into_killzone"] = int(ts.hour * 60 + ts.minute) % 60 if r.killzone_name else -1
+    # V17 FIX-9 : vraie formule. Avant: (ts.hour*60 + ts.minute) % 60 = ts.minute
+    # (bug semantique, juste la minute de l'heure UTC). Maintenant: minutes
+    # ecoulees depuis le debut de la KZ NY courante.
+    if r.killzone_name:
+        try:
+            from bot_v2.concepts.killzones import to_ny_time, KILLZONES
+            kz_def = next((k for k in KILLZONES if k.name == r.killzone_name), None)
+            if kz_def is not None:
+                ny_ts = to_ny_time(ts)
+                kz_start = ny_ts.replace(hour=kz_def.start_hour,
+                                          minute=kz_def.start_minute,
+                                          second=0, microsecond=0)
+                if kz_start > ny_ts:
+                    kz_start -= pd.Timedelta(days=1)
+                f["minutes_into_killzone"] = int((ny_ts - kz_start).total_seconds() / 60)
+            else:
+                f["minutes_into_killzone"] = -1
+        except Exception:
+            f["minutes_into_killzone"] = -1
+    else:
+        f["minutes_into_killzone"] = -1
+
+    # V15 (2026-05-25) : volume_relatif = volume de la bougie OB / moyenne 20
+    # dernieres bougies M1. Permet au ML de distinguer dead time (faible volume,
+    # piege) vs heure active (fort volume, vrai interet institutionnel).
+    # > 1.5 = forte participation, < 0.5 = mort. Calcul identique build/live.
+    f["volume_relatif"] = 1.0  # defaut neutre si pas calculable
+    if (df_ltf is not None and ob.validation_index is not None
+            and ob.validation_index >= 20 and "volume" in df_ltf.columns):
+        try:
+            idx = ob.validation_index
+            vol_ob = float(df_ltf["volume"].iloc[idx])
+            vol_avg = float(df_ltf["volume"].iloc[idx - 20:idx].mean())
+            if vol_avg > 0:
+                f["volume_relatif"] = round(vol_ob / vol_avg, 3)
+        except Exception:
+            pass
 
     # Features V3 (volatilite ATR)
     if df_ltf is not None and ob.validation_index is not None and ob.validation_index >= 14:
@@ -445,6 +617,63 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
     else:
         f["dist_to_d1_open_pct"] = 0.0
 
+    # ==================== V18.7 FEATURES NORMALISEES STATIONNAIRES ====================
+    # Adversarial validation V18.6 a revele que les features ci-dessus DRIFTENT
+    # entre train (2018-2025) et OOS (2025-2026). Cause : prix absolu change (XAU
+    # 1300->3500). Les % paraissent normalises mais ne le sont pas vraiment.
+    # V18.7 ajoute des versions ATR-normalisees, vraiment stationnaires.
+    # On garde les anciennes pour compat / ablation.
+
+    # 1. ATR % du prix : stationnaire vs epoque
+    #    XAU 2018 : atr=0.5 USD sur prix 1300 = 0.038%
+    #    XAU 2025 : atr=12 USD sur prix 3500 = 0.343% (different mais comparable)
+    #    Au moins, magnitudes restent dans la meme echelle
+    atr_at_setup = f.get("atr_at_setup", 0.0) or 0.0
+    if atr_at_setup > 0 and entry_price > 0:
+        f["atr_pct_of_price"] = atr_at_setup / entry_price * 100
+    else:
+        f["atr_pct_of_price"] = 0.0
+
+    # 2. risk_points en ATR : nb de ATR pour le risque (stationnaire)
+    risk_pts = f.get("risk_points", 0) or 0
+    if atr_at_setup > 0 and risk_pts > 0:
+        f["risk_atr"] = risk_pts / atr_at_setup
+    else:
+        f["risk_atr"] = 0.0
+
+    # 3. Versions LOG des % de distance (compresse les outliers, plus stable)
+    # log(1+x) au lieu de x = transforme les distributions skewed
+    import math as _math
+    f["dist_pdh_log"] = _math.log1p(f["dist_to_pdh_pct"]) if f["dist_to_pdh_pct"] >= 0 else 0.0
+    f["dist_pdl_log"] = _math.log1p(f["dist_to_pdl_pct"]) if f["dist_to_pdl_pct"] >= 0 else 0.0
+
+    # 4. Range journalier en ATR (vs absolu)
+    # Calcul via df_ltf (range jour courant) / ATR
+    if df_ltf is not None and ob.validation_index is not None and atr_at_setup > 0:
+        try:
+            ts_day = ts.normalize()
+            day_mask = (df_ltf.index >= ts_day) & (df_ltf.index <= ts)
+            day_slice = df_ltf[day_mask]
+            if len(day_slice) >= 5:
+                day_range = float(day_slice["high"].max() - day_slice["low"].min())
+                f["day_range_atr"] = day_range / atr_at_setup
+            else:
+                f["day_range_atr"] = 0.0
+        except Exception:
+            f["day_range_atr"] = 0.0
+    else:
+        f["day_range_atr"] = 0.0
+
+    # 5. Distance entry au mid-OB en ATR (vs absolu)
+    if atr_at_setup > 0:
+        ob_mid = (ob.ob_low + ob.ob_high) / 2
+        f["entry_to_ob_mid_atr"] = abs(entry_price - ob_mid) / atr_at_setup if ob_mid > 0 else 0.0
+        # Taille de l'OB en ATR (stationnaire vs prix absolu)
+        f["ob_size_atr"] = abs(ob.ob_high - ob.ob_low) / atr_at_setup
+    else:
+        f["entry_to_ob_mid_atr"] = 0.0
+        f["ob_size_atr"] = 0.0
+
     # ==================== NEW V5 FEATURES (2026-05-20) ====================
     f["phase_reversal"] = int("phase_reversal" in conf_text)
     f["phase_manipulation"] = int("phase_manipulation" in conf_text)
@@ -498,10 +727,12 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
         f["mom_60"] = (c_now - c_60) / c_60 * 100 if c_60 else 0.0
         f["mom_240"] = (c_now - c_240) / c_240 * 100 if c_240 else 0.0
         # Body ratio recent : marche directionnel (corps grands) ou choppy
+        # V17 FIX-15 : clip(0, 1) car body/range ne peut depasser 1.0 par definition.
+        # Avant : 1e-9 sur doji parfait -> ratio ~1e+15 polluait la moyenne.
         sl20 = df_ltf.iloc[idx - 20:idx]
         rng = (sl20["high"] - sl20["low"])
         body = (sl20["close"] - sl20["open"]).abs()
-        f["body_ratio_recent"] = float((body / rng.replace(0, 1e-9)).mean())
+        f["body_ratio_recent"] = float((body / rng.replace(0, 1e-9)).clip(0, 1).mean())
         # Momentum aligne avec la direction de l'OB ?
         mom_dir = 1 if f["mom_60"] > 0 else -1
         ob_dir = 1 if ob.direction == "bullish" else -1
@@ -519,18 +750,101 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
     # Hors KZ : fallback fenetre 60 M1 vs meme fenetre les 5 derniers jours.
     # Coherent avec une strategie M1 ICT/SMC (la volatilite depend de la session,
     # pas d'une moyenne 30j qui melange jours actifs et week-ends fermes).
-    f["atr_regime"] = _compute_atr_regime_v13(df_ltf, idx, r.killzone_name)
+    # V15.1 FIX A2 (2026-05-25) : atr_regime sur M15 au lieu M1.
+    # M15 = 5 KZ passees tiennent dans ~500 M15 (deja dispo via N_BARS_M15=11000).
+    # M1 = 5 KZ passees demande ~7200 M1 (probleme cote live N_BARS_M1=500).
+    # Alignement : build et live ont tous deux acces a M15. Plus rapide + 0 divergence.
+    f["atr_regime"] = _compute_atr_regime_v13(df_ltf, idx, r.killzone_name, df_htf=df_htf, ob_ts=ts)
 
     # --- Groupe E : distance aux niveaux daily en ATR (pas en %) ---
+    # V17 FIX-14 : signe conserve (sous PDH = negatif, au-dessus = positif).
+    # Avant: abs() perdait l'info "discount vs premium" critique en ICT.
     atr_ref = f.get("atr_at_setup", 0.0) or 0.0
     if atr_ref > 0 and pdh and entry_price:
-        f["dist_pdh_atr"] = abs(entry_price - pdh) / atr_ref
+        f["dist_pdh_atr"] = (entry_price - pdh) / atr_ref
     else:
         f["dist_pdh_atr"] = 0.0
     if atr_ref > 0 and pdl and entry_price:
-        f["dist_pdl_atr"] = abs(entry_price - pdl) / atr_ref
+        f["dist_pdl_atr"] = (entry_price - pdl) / atr_ref
     else:
         f["dist_pdl_atr"] = 0.0
+
+    # ==================== V18.4 FEATURES ICT (2026-05-27) ====================
+    # F1 : distance au round number (50/100/1000 selon actif) en ATR.
+    # ICT : les liquidites campent sur les round numbers. Plus on est proche, plus
+    # le sweep/raid est probable.
+    if entry_price and atr_ref > 0:
+        scale = 10 ** int(math.floor(math.log10(abs(entry_price))))
+        # round number = entier le plus proche au scale (ex: 1.0850 -> 1.0900)
+        rn_unit = scale / 10.0  # tick "naturel" : 0.001 EUR, 1 XAU, 100 BTC
+        rn_above = math.ceil(entry_price / rn_unit) * rn_unit
+        rn_below = math.floor(entry_price / rn_unit) * rn_unit
+        dist_rn = min(abs(entry_price - rn_above), abs(entry_price - rn_below))
+        f["dist_round_atr"] = dist_rn / atr_ref
+    else:
+        f["dist_round_atr"] = 1.0
+
+    # F2 : asymetrie de liquidite (highs vs lows touches dans les 240 dernieres M1)
+    # ICT : OB pertinent = ciblage d'un cote dominant (asymetrie elevee).
+    # Si autant de highs que lows -> range -> setup moins pertinent.
+    if df_ltf is not None and ob.validation_index is not None and ob.validation_index >= 240:
+        idx = ob.validation_index
+        sl = df_ltf.iloc[idx - 240:idx]
+        h_max = sl["high"].max()
+        l_min = sl["low"].min()
+        # Compte combien de bougies ont swing high == h_max (et idem low)
+        n_h = int((sl["high"] >= h_max * 0.9995).sum())
+        n_l = int((sl["low"] <= l_min * 1.0005).sum())
+        total = n_h + n_l
+        if total > 0:
+            # asymetrie [-1, 1] : 1 = uniquement highs, -1 = uniquement lows
+            f["liq_asymmetry"] = (n_h - n_l) / total
+        else:
+            f["liq_asymmetry"] = 0.0
+    else:
+        f["liq_asymmetry"] = 0.0
+
+    # F3 : ADR consumed % - range journalier deja consomme a la validation OB
+    # Si > 80% : journee deja epuisee, mouvement supplementaire improbable.
+    # Si < 30% : tot, beaucoup d'amplitude restante.
+    if df_ltf is not None and ob.validation_index is not None:
+        try:
+            idx = ob.validation_index
+            ts_day_start = ts.normalize()
+            day_mask = (df_ltf.index >= ts_day_start) & (df_ltf.index <= ts)
+            day_slice = df_ltf[day_mask]
+            if len(day_slice) >= 5:
+                day_range = float(day_slice["high"].max() - day_slice["low"].min())
+                # ADR = average daily range sur les 14 derniers jours via df_d1
+                if df_d1 is not None and len(df_d1) >= 14:
+                    past_d1 = df_d1[df_d1.index < ts_day_start]
+                    if len(past_d1) >= 14:
+                        adr = float((past_d1["high"] - past_d1["low"]).iloc[-14:].mean())
+                        f["adr_consumed_pct"] = day_range / adr if adr > 0 else 0.0
+                    else:
+                        f["adr_consumed_pct"] = 0.0
+                else:
+                    f["adr_consumed_pct"] = 0.0
+            else:
+                f["adr_consumed_pct"] = 0.0
+        except Exception:
+            f["adr_consumed_pct"] = 0.0
+    else:
+        f["adr_consumed_pct"] = 0.0
+
+    # F4 : interactions (top combinaisons identifiees dans l'audit V18.1)
+    # daily_bias_aligned + FVG_sync = +18pts WR cumule -> interaction puissante
+    f["bias_x_fvg"] = f["daily_bias_aligned"] * f["has_FVG_sync"]
+    # Confluence forte : bias + parent_ob + FVG
+    f["bias_x_parent_x_fvg"] = (f["daily_bias_aligned"]
+                                * f["has_parent_ob"]
+                                * f["has_FVG_sync"])
+    # NY_AM x bias = killzone premium
+    f["kz_ny_am_x_bias"] = f["kz_ny_am"] * f["daily_bias_aligned"]
+    # OB strength x sweep strength = qualite structurelle
+    f["ob_x_sweep_strength"] = f["ob_strength"] * f["sweep_strength"]
+    # Unicorn + KZ premium (NY)
+    f["unicorn_x_ny"] = f["is_unicorn"] * (f["kz_ny_am"] + f["kz_ny_pm"])
 
     return f
 

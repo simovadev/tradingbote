@@ -153,11 +153,13 @@ def detect_structure_breaks(
         else:
             kind = "MSS"
 
-        # Pour MSS : check FVG dans displacement (3 bougies avant -> 3 apres).
+        # V17 FIX-5 : Pour MSS, check FVG dans displacement SUR LE PASSE UNIQUEMENT.
+        # Avant : fenetre [j-3, j+3] -> leak +3 bougies futures (training vs live).
+        # Maintenant : [j-3, j] (passe/present uniquement).
         has_fvg = False
         if kind == "MSS":
             window_start = max(0, j - 3)
-            window_end = min(_n, j + 4)
+            window_end = j + 1  # inclus j, EXCLUS j+1, j+2, j+3
             _at = _fvg_bull_at if direction == "bullish" else _fvg_bear_at
             for _ci in range(window_start, window_end):
                 if _at[_ci]:

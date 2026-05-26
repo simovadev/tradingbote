@@ -185,11 +185,13 @@ def detect_unicorn_setup(
 
     Returns True si tous les elements sont reunis.
     """
-    # Check FVG dans displacement (3 bougies autour de validation)
+    # Check FVG dans displacement (3 bougies AVANT/A validation - V17 FIX-4)
+    # Avant : abs(center - vi) <= 3 -> acceptait FVG +3 bougies APRES validation = leak
+    # Maintenant : strict passe/present, FVG dans [vi-3, vi]
     has_fvg = False
     for f in fvgs:
         if f.direction == ob.direction:
-            if abs(f.center_index - ob.validation_index) <= 3:
+            if 0 <= ob.validation_index - f.center_index <= 3:
                 has_fvg = True
                 break
 
@@ -221,42 +223,19 @@ RETEST_LOOKAHEAD_BARS = 15  # V9: horizon cohérent live/training (15 bougies M1
 
 
 def count_ob_retests(ob: OrderBlock, df: pd.DataFrame, lookahead_bars: int = RETEST_LOOKAHEAD_BARS) -> int:
-    """Compte combien de fois le price est revenu TOUCHER l'OB dans une fenetre
-    limitée APRES validation.
+    """V17 FIX-3 : retourne TOUJOURS 0.
 
-    FIX V9 (2026-05-22) : DATA LEAKAGE corrige. Avant, le compteur regardait
-    TOUTES les bougies apres validation_index (jusqu'a la fin du df). En training,
-    cela exposait jusqu'a plusieurs heures de futur ; en live, le compteur valait
-    quasi toujours 0-1 au moment de la decision. Le ML apprenait sur le futur.
+    Avant V17 : regardait 15 bougies APRES validation. Disponible en training
+    (df complet) mais 0 en live (1 OB = 1 eval a la validation, pas de re-eval
+    grace au fix V15 evaluated_keys). Divergence systematique.
 
-    Maintenant : on cap à `lookahead_bars` bougies apres validation (defaut 15 M1).
-    Coherent avec le live : le bot scanne en boucle et re-evalue l'OB pendant la
-    fenetre `recent_cutoff=60min`, donc 15 bougies apres validation est accessible.
+    V17 : la feature est figee a 0 (= "pas encore de retest a la validation",
+    ce qui est l'etat reel au moment de la decision). Le ML doit decider sans
+    cette feature. Pour ne pas casser la signature, on garde le param mais on
+    n'utilise pas df. Si on veut une vraie feature retest_count, il faut la
+    calculer SUR LE PASSE (avant validation), pas le futur.
     """
-    if ob.validation_index >= len(df) - 1:
-        return 0
-
-    end_idx = min(len(df), ob.validation_index + 1 + lookahead_bars)
-    after = df.iloc[ob.validation_index + 1:end_idx]
-    touches = 0
-    in_zone = False
-
-    for _, row in after.iterrows():
-        # Touch = high ou low entre dans la zone OB
-        touched = not (row["high"] < ob.ob_low or row["low"] > ob.ob_high)
-        if touched:
-            if not in_zone:
-                touches += 1
-                in_zone = True
-            # Si le price casse de l'autre cote = OB invalide, on stoppe
-            if ob.direction == "bullish" and row["close"] < ob.ob_low:
-                break
-            if ob.direction == "bearish" and row["close"] > ob.ob_high:
-                break
-        else:
-            in_zone = False
-
-    return touches
+    return 0
 
 
 def compute_setup_quality(

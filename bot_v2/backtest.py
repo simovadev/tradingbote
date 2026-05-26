@@ -17,7 +17,7 @@ from bot_v2.pipeline import PipelineResult, run_pipeline
 from bot_v2.trade_setup import TradeSetup
 
 
-TradeOutcome = Literal["WIN", "LOSS", "PENDING", "NO_FILL"]
+TradeOutcome = Literal["WIN", "LOSS", "PENDING", "NO_FILL", "AMBIGUOUS", "NO_FUTURE"]
 
 
 @dataclass
@@ -148,6 +148,88 @@ def simulate_trade(
         setup=setup,
         outcome="PENDING",
         fill_index=fill_idx, fill_ts=df.index[fill_idx],
+        exit_index=None, exit_ts=None, exit_price=None,
+        pnl_usd=0.0, pnl_pct=0.0,
+    )
+
+
+def simulate_trade_market(
+    setup: TradeSetup,
+    df: pd.DataFrame,
+    entry_index: int,
+) -> TradeResult:
+    """Simule un trade MARKET : entry IMMEDIATE a l'open de entry_index (pas de fill).
+
+    Difference avec simulate_trade (LIMIT) : ici on entre direct au marche, pas
+    d'attente que le prix revienne toucher l'entry. C'est ce que le live fait
+    reellement (place_market_order). entry_index = bougie ou le bot scanne et
+    decide (= validation + latence reelle).
+
+    Le SL/TP du setup sont supposes deja recalcules sur le prix MARKET reel par
+    l'appelant. On scanne SL/TP a partir de entry_index INCLUS (V15 FIX DIV A,
+    2026-05-25) : en live, MT5 voit tous les ticks DES vi+1 (la bougie ou
+    l'ordre est passe), donc on doit aussi scanner cette bougie pour les
+    SL/TP touches intra-bar. Avant le fix, on scannait a partir de vi+2 ->
+    sous-estimation des LOSS rapides.
+    """
+    highs = df["high"].values
+    lows = df["low"].values
+    sl = setup.stop_loss
+    tp = setup.take_profit
+
+    if entry_index >= len(df):
+        return TradeResult(
+            setup=setup, outcome="NO_FUTURE",
+            fill_index=None, fill_ts=None,
+            exit_index=None, exit_ts=None, exit_price=None,
+            pnl_usd=0.0, pnl_pct=0.0,
+        )
+
+    max_scan_bars = 1440
+    scan_end = min(entry_index + max_scan_bars, len(df))
+    # V15 FIX DIV A : scan inclut entry_index (= vi+1)
+    for j in range(entry_index, scan_end):
+        h = highs[j]
+        l = lows[j]
+        if setup.direction == "bullish":
+            sl_hit = l <= sl
+            tp_hit = h >= tp
+        else:
+            sl_hit = h >= sl
+            tp_hit = l <= tp
+        # BUG #6 FIX (2026-05-26) : sur la bougie d'entree UNIQUEMENT, si SL ET TP
+        # sont tous deux dans le range -> AMBIGUOUS (ne pas etiqueter LOSS par
+        # defaut). Sur NAS100/BTC/XAU volatiles, la bougie M1 d'entree couvre
+        # souvent SL+TP -> de vrais WIN etaient marques LOSS = bruit pour le ML.
+        # Sur les bougies suivantes, on garde la regle conservatrice (SL prioritaire).
+        if j == entry_index and sl_hit and tp_hit:
+            return TradeResult(
+                setup=setup, outcome="AMBIGUOUS",
+                fill_index=entry_index, fill_ts=df.index[entry_index],
+                exit_index=j, exit_ts=df.index[j], exit_price=None,
+                pnl_usd=0.0, pnl_pct=0.0,
+            )
+        # SL prioritaire si les deux dans la meme bougie (conservateur)
+        if sl_hit:
+            return TradeResult(
+                setup=setup, outcome="LOSS",
+                fill_index=entry_index, fill_ts=df.index[entry_index],
+                exit_index=j, exit_ts=df.index[j], exit_price=sl,
+                pnl_usd=-setup.risk_usd,
+                pnl_pct=-setup.risk_usd / INITIAL_BALANCE_USD * 100,
+            )
+        if tp_hit:
+            return TradeResult(
+                setup=setup, outcome="WIN",
+                fill_index=entry_index, fill_ts=df.index[entry_index],
+                exit_index=j, exit_ts=df.index[j], exit_price=tp,
+                pnl_usd=setup.reward_usd,
+                pnl_pct=setup.reward_usd / INITIAL_BALANCE_USD * 100,
+            )
+
+    return TradeResult(
+        setup=setup, outcome="PENDING",
+        fill_index=entry_index, fill_ts=df.index[entry_index],
         exit_index=None, exit_ts=None, exit_price=None,
         pnl_usd=0.0, pnl_pct=0.0,
     )

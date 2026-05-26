@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from bot_v2.backtest import simulate_trade
+from bot_v2.backtest import simulate_trade, simulate_trade_market
 from bot_v2.config import SMT_PAIRS, get_param, primary_instruments
 from bot_v2.concepts.breaker import detect_breakers
 from bot_v2.concepts.daily_bias import build_d1_from_h1
@@ -85,8 +85,10 @@ def _extract_features(r, ob, instrument, df_ltf=None, df_d1=None, df_htf=None, m
         "ts": ob.validation_ts,
         "direction": ob.direction,
     }
+    # V15.1 FIX : propage df_htf a _features_from_result pour atr_regime sur M15
     f.update(ml_filter._features_from_result(
         r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups,
+        df_htf=df_htf,
     ))
     return f
 
@@ -233,8 +235,17 @@ def _process_instrument(args):
             except Exception:
                 continue
 
-        swing_strength_ltf = get_param(inst, "swing_strength_m1", 2)
-        obs = detect_order_blocks(df_ltf_w, swing_strength=swing_strength_ltf)
+        # V18.2 (Soufiane 2026-05-27) : params optimisables via env vars pour optim genetique
+        import os as _os
+        swing_strength_ltf = int(_os.environ.get("V18_SWING_STRENGTH", "0")) or get_param(inst, "swing_strength_m1", 2)
+        min_group = int(_os.environ.get("V18_MIN_GROUP", "1"))
+        max_bars_sweep = int(_os.environ.get("V18_MAX_BARS", "10000"))
+        obs = detect_order_blocks(
+            df_ltf_w,
+            swing_strength=swing_strength_ltf,
+            min_group_size=min_group,
+            max_bars_after_sweep=max_bars_sweep,
+        )
 
         # Cache pour acceleration (chunk-local : swings/fvg/breakers sur la fenetre)
         cache = {
@@ -285,6 +296,13 @@ def _process_instrument(args):
         # post-OB, ce qui le fait entrer trop tard en live.
         SNAPSHOTS_K = [3, 7, 15] if not _v12_mode else [0]  # [0] = mode V12 amont
         for ob in prefiltered_obs:
+            # V14-KZ (2026-05-25) : on NE GARDE QUE les OB valides DANS une killzone.
+            # Hors killzone = trade dechet (bible Vizion §8.5). Le ML apprend donc
+            # uniquement sur les setups en KZ (Asia/London/NY_AM/NY_Lunch/NY_PM/
+            # London_Close). Le live applique le meme filtre. Coherence build/live.
+            if killzone_at(ob.validation_ts) is None:
+                continue
+
             # Verdict pipeline calcule UNE FOIS sur le df complet (Vizion
             # eliminatoires : bias, KZ, phase, etc. ne changent pas avec K).
             r_full = evaluate_ob(
@@ -301,25 +319,63 @@ def _process_instrument(args):
                 continue
 
             # Outcome = realite finale (calculee une fois)
+            # V14-MARKET (2026-05-25) : on simule un MARKET avec la VRAIE latence live.
+            # Le bot live scanne ~7-10s APRES la close de la bougie de validation
+            # (offset xx:00:06-07) puis envoie place_market_order. Donc l'execution
+            # reelle se fait a l'OPEN de la bougie SUIVANTE (vi+1), qui demarre juste
+            # apres la close de vi. PAS un LIMIT (attente retour OB), PAS 2 min de
+            # latence. Juste l'open de vi+1 = ~prix au moment du scan.
+            # Cf user 2026-05-25 : "le bot a une latence de 10s, pas 2 bougies".
             try:
                 setup_full = r_full.trade_setup
+                # Entry MARKET = OPEN de la bougie vi+1 (= prix ~7-10s apres close vi)
+                entry_idx = ob.validation_index + 1
+                if entry_idx >= len(df_ltf_w):
+                    continue
+                entry_market = float(df_ltf_w["open"].iloc[entry_idx])
+                # ALIGNEMENT LIVE EXACT (cf execute_setup live_runner_v2) :
+                # - Entry MARKET = prix reel au scan (close vi+latence)
+                # - SL = ob structure (= setup.stop_loss, inchange)
+                # - TP = NIVEAU FIXE theorique (= setup.take_profit). Le live envoie
+                #   place_market_order(tp=setup.take_profit) = niveau structurel fixe,
+                #   PAS un RR recalcule. Donc le RR reel varie selon ou on entre.
+                sl_price = setup_full.stop_loss
+                tp_price = setup_full.take_profit  # niveau fixe, comme le live
+                # risk_dist reel = distance entry MARKET -> SL
+                if setup_full.direction == "bullish":
+                    risk_dist = entry_market - sl_price
+                    reward_dist = tp_price - entry_market
+                else:
+                    risk_dist = sl_price - entry_market
+                    reward_dist = entry_market - tp_price
+                # Filtre RR-marche live : skip si SL deja franchi OU RR_reel < 1.0
+                # (= exactement le filtre execute_setup live_runner_v2).
+                if risk_dist <= 0:
+                    continue
+                rr_reel = reward_dist / risk_dist
+                if rr_reel < 1.0:
+                    continue
+                # V15.1 FIX A11 : balance 60->10000, risk 10%->1% pour eviter
+                # le filtre lots<=0 qui supprimait des trades pour les actifs
+                # avec lot min eleve (XAU, NAS, GER). Le dataset doit etre
+                # independant de la taille du compte live actuel.
                 lots, risk_usd = compute_position_size(
-                    setup_full.entry_price, setup_full.stop_loss, inst,
-                    balance=60.0, risk_pct=0.10,
+                    entry_market, sl_price, inst, balance=10000.0, risk_pct=0.01,
                 )
                 if lots <= 0:
                     continue
                 sim_setup = TradeSetup(
                     instrument=inst, direction=setup_full.direction,
-                    entry_price=setup_full.entry_price, stop_loss=setup_full.stop_loss,
-                    take_profit=setup_full.take_profit, rr=setup_full.rr,
-                    risk_points=setup_full.risk_points, reward_points=setup_full.reward_points,
-                    risk_usd=risk_usd, reward_usd=risk_usd * setup_full.rr,
+                    entry_price=entry_market, stop_loss=sl_price,
+                    take_profit=tp_price, rr=rr_reel,
+                    risk_points=abs(risk_dist), reward_points=abs(reward_dist),
+                    risk_usd=risk_usd, reward_usd=risk_usd * rr_reel,
                     position_size_lots=lots,
                     ob_validation_ts=setup_full.ob_validation_ts,
                     tp_source=setup_full.tp_source,
                 )
-                tr = simulate_trade(sim_setup, df_ltf_w, ob.validation_index + 1)
+                # MARKET : entry direct a entry_idx, scan SL/TP apres
+                tr = simulate_trade_market(sim_setup, df_ltf_w, entry_idx)
                 outcome = tr.outcome
                 pnl_usd = tr.pnl_usd
                 bars_to_exit = (tr.exit_index - tr.fill_index) if (tr.exit_index and tr.fill_index) else None
@@ -349,7 +405,12 @@ def _process_instrument(args):
                 # est incluse car c'est la cassure qui valide l'OB, mais rien apres).
                 # V11 (K=3,7,15) : cache inclut K bougies POST-validation (leakage).
                 if _v12_mode:
-                    cut_idx = vi + 1  # df_ltf_K = bougies <= vi (validation incluse)
+                    # V14-MARKET : features calculees a vi (la bougie de validation
+                    # que le bot voit fermer). cut_idx = vi+1 = inclut vi, rien apres.
+                    # Le bot scanne ~7s apres la close de vi -> il a EXACTEMENT ces
+                    # features. L'entry MARKET se fait a l'open de vi+1 (cf plus haut).
+                    # Pas de leakage, pas de latence artificielle.
+                    cut_idx = vi + 1
                 else:
                     cut_idx = vi + 1 + K
                 # Skip si pas assez de bougies futures (fin de chunk)
@@ -367,7 +428,13 @@ def _process_instrument(args):
                 # Structure breaks : visible si break_index <= cut_idx.
                 structure_K = [sb for sb in structure_full if sb.break_index <= cut_idx]
                 # MSS : visible si retest_index <= cut_idx (la confirmation finale).
-                mss_K = [m for m in mss_full if m.retest_index is not None and m.retest_index <= cut_idx]
+                # V17 FIX-11 : filtre sur break_index (= ce que has_mss_nearby utilise)
+                # au lieu de retest_index. Avant : training excluait des MSS dont
+                # break_index <= cut_idx mais retest_index > cut_idx, alors que le
+                # live les inclut. Divergence corrigee.
+                mss_K = [m for m in mss_full
+                         if getattr(m, "mss", m).break_index <= cut_idx
+                         and (m.retest_index is None or m.retest_index <= cut_idx)]
                 # htf_trend recalcule sur swings filtres (rapide, juste lookback=6)
                 try:
                     htf_trend_K = detect_trend(swings_K, lookback=6)
@@ -379,6 +446,9 @@ def _process_instrument(args):
                     "obs_htf": cache.get("obs_htf"),
                     "obs_htf2": cache.get("obs_htf2"),
                     "htf_trend": htf_trend_K,
+                    # V15.1 FIX A14 : propage mss_setups tronques au cache pour
+                    # eviter que evaluate_ob recalcule mss sur df complet (leak).
+                    "mss_setups": mss_K,
                 }
 
                 r_K = evaluate_ob(
@@ -414,7 +484,8 @@ def _process_instrument(args):
         # Filtrer par daily_bias annulerait l'essence du setup. Le ML decidera.
         # On garde le daily_bias comme FEATURE pour que le ML l'apprenne.
         from bot_v2.concepts.daily_bias import compute_daily_bias
-        from bot_v2.concepts.killzones import killzone_at
+        # killzone_at deja importe au niveau module (ligne 32) - pas de re-import
+        # local sinon Python le traite comme variable locale dans toute la fonction.
         for mss in prefiltered_mss:
             if mss.retest_index is None:
                 continue
@@ -482,9 +553,12 @@ def _process_instrument(args):
             }
 
             # Simulate trade pour outcome
+            # V17 FIX-12 : aligne balance/risk avec la boucle OB (10000/1%) au lieu
+            # de 60/10%. Sinon la boucle MSS est biaisee a defavoriser les actifs
+            # a lot min eleve (NAS, GER, BTC).
             try:
                 lots, risk_usd = compute_position_size(
-                    mss.entry_price, mss.stop_loss, inst, balance=60.0, risk_pct=0.10,
+                    mss.entry_price, mss.stop_loss, inst, balance=10000.0, risk_pct=0.01,
                 )
                 if lots <= 0:
                     continue
@@ -634,6 +708,14 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
     print("\nDistribution outcomes :")
     print(df["outcome"].value_counts().to_string())
 
+    # BUG #6 FIX (2026-05-26) : AMBIGUOUS = SL et TP dans la meme bougie M1
+    # d'entree. On les EXCLUT du WR brut (et le training les exclut via
+    # prepare_xy.outcome.isin(["WIN","LOSS"])). Logger leur volume pour suivi.
+    n_amb = int((df["outcome"] == "AMBIGUOUS").sum())
+    if n_amb > 0:
+        pct_amb = 100.0 * n_amb / max(len(df), 1)
+        print(f"\nAMBIGUOUS (SL+TP meme bougie entree) : {n_amb} ({pct_amb:.1f}%) -> exclus du training")
+
     closed = df[df["outcome"].isin(["WIN", "LOSS"])]
     if len(closed) > 0:
         wr = (closed["outcome"] == "WIN").mean() * 100
@@ -646,6 +728,9 @@ def build_dataset(start_ts, end_ts, instruments=None, output_path=None, chunk_mo
             output_path = Path(f"{_root}/data/ml_dataset.parquet")
         else:
             output_path = Path(f"{_root}/data/ml_dataset_{ltf}.parquet")
+    # V18.3 FIX : convertit str -> Path si l'appelant a passe une str
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(output_path)
     print(f"\nDataset sauve : {output_path}")

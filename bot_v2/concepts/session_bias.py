@@ -83,12 +83,13 @@ def get_session_context(
 
     # Range so far vs moyenne 5 jours
     range_so_far = float(session_bars["high"].max() - session_bars["low"].min())
-    # Range moyen sur 5 sessions equivalentes
+    # V17 FIX-7 : avg_range calcule sur les 5j AVANT ts (pas avant df.index.max()).
+    # Avant V17 : last_5d_idx = df.index.max() - 5d -> en training, df.index.max() etait
+    # la fin du chunk donc on regardait dans le FUTUR de ts. Leak corrige.
     avg_range = 0.0
     try:
-        last_5d_idx = df.index.max() - pd.Timedelta(days=5)
-        df_5d = df[df.index >= last_5d_idx]
-        # Approximation : moyenne high-low sur la fenetre 5j
+        last_5d_idx = ts - pd.Timedelta(days=5)
+        df_5d = df[(df.index >= last_5d_idx) & (df.index <= ts)]
         if len(df_5d) > 0:
             avg_range = float((df_5d["high"].rolling(60).max() - df_5d["low"].rolling(60).min()).mean())
     except Exception:
