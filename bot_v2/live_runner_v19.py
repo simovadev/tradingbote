@@ -39,7 +39,7 @@ sys.path.insert(0, str(ROOT))
 
 # Defaults env (setdefault = respecte l'env si deja defini)
 os.environ.setdefault("DASHBOARD_URL", "https://tradingbote-production.up.railway.app/api/ingest")
-os.environ.setdefault("BOT_THRESHOLD", "0.30")
+os.environ.setdefault("BOT_THRESHOLD", "0.60")
 os.environ.setdefault("RECENT_CUTOFF_MIN", "60")
 
 # ============ Logging ============
