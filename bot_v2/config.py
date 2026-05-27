@@ -252,6 +252,207 @@ INSTRUMENTS: dict[str, dict] = {
         "duka": None, "tick_value": 1.0, "min_sl_points": 5.0,
         "label": "Ethereum", "role": "primary", "type": "crypto",
     },
+    # === V20 : 50 nouveaux actifs Vantage (added 2026-05-27) ===
+    "EURJPY": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.1,
+        "label": "EURJPY (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "EURGBP": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURGBP (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "EURCHF": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURCHF (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "EURAUD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURAUD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "EURCAD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURCAD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "EURNZD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURNZD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "GBPJPY": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.1,
+        "label": "GBPJPY (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "GBPCHF": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "GBPCHF (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "GBPAUD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "GBPAUD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "GBPCAD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "GBPCAD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "GBPNZD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "GBPNZD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "AUDJPY": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.1,
+        "label": "AUDJPY (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "AUDCHF": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "AUDCHF (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "AUDCAD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "AUDCAD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "AUDNZD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "AUDNZD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "NZDJPY": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.1,
+        "label": "NZDJPY (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "NZDCHF": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "NZDCHF (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "NZDCAD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "NZDCAD (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "CADJPY": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.1,
+        "label": "CADJPY (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "CADCHF": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "CADCHF (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "CHFJPY": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.1,
+        "label": "CHFJPY (forex_crosses)", "role": "secondary", "type": "forex",
+    },
+    "USDTRY": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDTRY (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDSGD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDSGD (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDHKD": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDHKD (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDNOK": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDNOK (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDSEK": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDSEK (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDDKK": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDDKK (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDPLN": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDPLN (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "USDCNH": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "USDCNH (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "EURPLN": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURPLN (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "EURNOK": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURNOK (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "EURSEK": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURSEK (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "EURHUF": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURHUF (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "EURCZK": {
+        "duka": None, "tick_value": 100000.0, "min_sl_points": 0.001,
+        "label": "EURCZK (forex_exotic)", "role": "secondary", "type": "forex",
+    },
+    "XAUEUR": {
+        "duka": None, "tick_value": 100.0, "min_sl_points": 0.40504,
+        "label": "XAUEUR (metals)", "role": "secondary", "type": "metal",
+    },
+    "XAUAUD": {
+        "duka": None, "tick_value": 100.0, "min_sl_points": 0.67645,
+        "label": "XAUAUD (metals)", "role": "secondary", "type": "metal",
+    },
+    "XAUJPY": {
+        "duka": None, "tick_value": 100.0, "min_sl_points": 75.14725,
+        "label": "XAUJPY (metals)", "role": "secondary", "type": "metal",
+    },
+    "XPDUSD": {
+        "duka": None, "tick_value": 5000.0, "min_sl_points": 0.1581,
+        "label": "XPDUSD (metals)", "role": "secondary", "type": "metal",
+    },
+    "XPTUSD": {
+        "duka": None, "tick_value": 5000.0, "min_sl_points": 0.20818,
+        "label": "XPTUSD (metals)", "role": "secondary", "type": "metal",
+    },
+    "CHINA50": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 7.47425,
+        "label": "CHINA50 (indices)", "role": "secondary", "type": "index",
+    },
+    "LTCUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.05458,
+        "label": "LTCUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "XRPUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.00139,
+        "label": "XRPUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "ADAUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.00025,
+        "label": "ADAUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "BCHUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.44869,
+        "label": "BCHUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "DOTUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.00126,
+        "label": "DOTUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "LNKUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.00912,
+        "label": "LNKUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "SOLUSD": {
+        "duka": None, "tick_value": 1.0, "min_sl_points": 0.08518,
+        "label": "SOLUSD (crypto)", "role": "secondary", "type": "crypto",
+    },
+    "UKOUSD": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.05,
+        "label": "UKOUSD (energy)", "role": "secondary", "type": "energy",
+    },
+    "Cotton-C": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.01,
+        "label": "Cotton-C (softs)", "role": "secondary", "type": "soft",
+    },
+    "Soybean-C": {
+        "duka": None, "tick_value": 1000.0, "min_sl_points": 0.0115,
+        "label": "Soybean-C (softs)", "role": "secondary", "type": "soft",
+    },
 }
 
 DEFAULT_INSTRUMENT = "XAUUSD"
