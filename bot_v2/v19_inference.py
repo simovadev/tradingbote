@@ -130,7 +130,9 @@ class V19Predictor:
             cls._instance = cls(model_path)
             return cls._instance
         except Exception as e:
-            print(f"[V19Predictor] Failed to load : {e}")
+            import traceback
+            print(f"[V19Predictor] Failed to load V19 ({type(e).__name__}): {e}")
+            traceback.print_exc()
             return None
 
     def predict_one(self, ict_features_dict: dict, instrument: str,
