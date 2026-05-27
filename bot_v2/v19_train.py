@@ -29,8 +29,14 @@ sys.path.insert(0, ROOT)
 from bot_v2.v19_model import V19ICTNet, ict_aware_loss, count_params
 
 
-TRAIN_END = pd.Timestamp("2025-05-22").to_datetime64()
-VAL_END = pd.Timestamp("2025-11-22").to_datetime64()
+# V19 FIX leakage : embargo 2j entre splits.
+# simulate_trade scanne jusqu'a 1440 M1 (24h) pour fermer un trade.
+# Sans embargo, des trades de fin TRAIN ont leur outcome calcule sur des bougies VAL
+# -> contamination future->passe. 2 jours = couvre 24h scan + marge.
+TRAIN_END = pd.Timestamp("2025-05-20").to_datetime64()
+VAL_START = pd.Timestamp("2025-05-22").to_datetime64()  # embargo 2j
+VAL_END = pd.Timestamp("2025-11-20").to_datetime64()
+OOS_START = pd.Timestamp("2025-11-22").to_datetime64()  # embargo 2j
 
 
 class V19Dataset(Dataset):
@@ -107,10 +113,10 @@ def main():
     print(f"  Champions (1) : {(lbl == 1).sum()}")
     print(f"  Clear LOSS (0): {(lbl == 0).sum()}")
 
-    # Splits temporels
+    # Splits temporels AVEC EMBARGO 2j (anti-leakage future->passe)
     train_mask = ts < TRAIN_END
-    val_mask = (ts >= TRAIN_END) & (ts < VAL_END)
-    oos_mask = ts >= VAL_END
+    val_mask = (ts >= VAL_START) & (ts < VAL_END)
+    oos_mask = ts >= OOS_START
 
     print(f"\nSplits temporels :")
     print(f"  Train : {train_mask.sum()} samples")

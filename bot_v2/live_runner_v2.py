@@ -308,7 +308,23 @@ def load_model(instrument: str) -> tuple[Any, list[str]] | None:
     return model, features
 
 
-def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, mss_setups=None, df_htf=None) -> float:
+def predict_proba(model, features, r, ob, instrument, df_ltf=None, df_d1=None, mss_setups=None, df_htf=None, df_h1=None) -> float:
+    # V19 (2026-05-27) : si modele V19 (PyTorch DL) dispo, on l'utilise en PRIORITE.
+    # Sinon fallback sur LightGBM V17/V18.x.
+    try:
+        from bot_v2.v19_inference import predict_proba_v19, is_v19_available
+        if is_v19_available():
+            proba_v19 = predict_proba_v19(
+                r, ob, instrument,
+                df_m1=df_ltf, df_m15=df_htf, df_h1=df_h1,
+                df_d1=df_d1, mss_setups=mss_setups,
+            )
+            if proba_v19 is not None:
+                return proba_v19
+    except Exception as e:
+        log.warning(f"V19 predict failed for {instrument}: {e} -> fallback LightGBM")
+
+    # Fallback LightGBM (V17/V18.x)
     # FIX V5.1 (2026-05-20) : passer mss_setups pour la feature has_mss_nearby.
     # Sans ca, has_mss_nearby=0 toujours -> ML proba chute ~0.20 -> bot ne trade jamais.
     feats = ml_filter._features_from_result(r, ob, instrument, df_ltf=df_ltf, df_d1=df_d1, mss_setups=mss_setups, df_htf=df_htf)
