@@ -90,6 +90,7 @@ MAX_CONCURRENT_TRADES = 5  # cap global ordres simultanes
 
 # ============ State global ============
 _seen_obs: set[tuple] = set()  # (asset, ts_ob) deja traites pour pas re-trader
+_boot_ts: pd.Timestamp | None = None  # UTC : OBs anterieurs ignores
 
 
 # ============ Fetch data ============
@@ -131,8 +132,11 @@ def process_asset(asset: str, predictor: V19Predictor | None,
         obs = detect_order_blocks(df_m1, swing_strength=swing_strength)
 
         # Filtre OBs recents (validation_ts >= last_bar - RECENT_CUTOFF_MIN)
+        # ET >= _boot_ts (anti-rafale au demarrage : on ne trade pas les OBs deja vieux)
         last_bar = df_m1.index[-1]
         cutoff = last_bar - pd.Timedelta(minutes=RECENT_CUTOFF_MIN)
+        if _boot_ts is not None and _boot_ts > cutoff:
+            cutoff = _boot_ts
         obs_recent = [
             ob for ob in obs
             if ob.validation_ts is not None
@@ -349,6 +353,12 @@ def main():
     )
     log.info(f"DashboardPusher : url={pusher.url}, session={session_id}")
     pusher.push_start(f"Bot V19 demarre (threshold={THRESHOLD})")
+
+    # Anti-rafale au boot : on n'evalue que les OBs valides APRES le demarrage
+    # _boot_ts est tz-aware UTC, comparable a ob.validation_ts (qui est aussi tz-aware UTC)
+    global _boot_ts
+    _boot_ts = pd.Timestamp.now(tz="UTC")
+    log.info(f"BOOT_TS = {_boot_ts} (OBs anterieurs ignores au demarrage)")
 
     log.info("=" * 60)
     log.info("DEMARRAGE BOUCLE PRINCIPALE - 1 cycle/min")
