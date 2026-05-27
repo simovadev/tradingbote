@@ -126,7 +126,7 @@ BROKER_MAP = {
     "USDZAR":   "USDZAR+",
     "USDTRY":   "USDTRY+",
     "USDSGD":   "USDSGD+",
-    "USDHKD":   "USDHKD+",
+    # USDHKD : KO sur compte RAW (pas tradable)
     "USDNOK":   "USDNOK+",
     "USDSEK":   "USDSEK+",
     "USDDKK":   "USDDKK+",
@@ -137,10 +137,10 @@ BROKER_MAP = {
     "EURSEK":   "EURSEK+",
     "EURHUF":   "EURHUF+",
     "EURCZK":   "EURCZK+",
-    # Metaux (sans suffixe pour la plupart)
-    "XAUEUR":   "XAUEUR",
-    "XAUAUD":   "XAUAUD",
-    "XAUJPY":   "XAUJPY",
+    # Metaux : XAU pairs avec + (verifie RAW), XPD/XPT sans
+    "XAUEUR":   "XAUEUR+",
+    "XAUAUD":   "XAUAUD+",
+    "XAUJPY":   "XAUJPY+",
     "XPDUSD":   "XPDUSD",
     "XPTUSD":   "XPTUSD",
     # Indices
