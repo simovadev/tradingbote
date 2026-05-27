@@ -821,7 +821,29 @@ def compute_asset(payload: dict) -> dict:
                 df_htf=df_m15,
             )
             diag_ml_probas.append(proba)
+
+            # INVERSE_TRADE_MODE (2026-05-27, user idea):
+            # proba < INVERSE_THR (0.20) ET INVERSE_TRADE_MODE=1 -> trade en SENS INVERSE
+            # Sinon : zone d'incertitude (0.20-0.65) -> SKIP comme avant.
+            inverse_thr = float(os.environ.get("INVERSE_THR", "0.20"))
+            inverse_mode = os.environ.get("INVERSE_TRADE_MODE", "0") == "1"
+
             if proba < threshold:
+                if inverse_mode and proba < inverse_thr:
+                    # On envoie le setup au master qui s'occupera du SWAP + cap MT5
+                    valid_setups.append({
+                        "instrument": instrument,
+                        "ts": df_m1.index[ob.validation_index],
+                        "ob": ob,
+                        "r": r,
+                        "proba": proba,
+                        "df_m1": df_m1,
+                        "inverse": True,
+                    })
+                    diag_reasons["inverse_taken"] = diag_reasons.get("inverse_taken", 0) + 1
+                    continue
+
+                # Skip zone d'incertitude -> log rejet normal
                 ts_ob = df_m1.index[ob.validation_index]
                 _entry = float(r.trade_setup.entry_price)
                 _sl = float(r.trade_setup.stop_loss)
@@ -854,6 +876,7 @@ def compute_asset(payload: dict) -> dict:
                 "r": r,
                 "proba": proba,
                 "df_m1": df_m1,
+                "inverse": False,
             })
 
         if debug_diag and (diag_reasons or diag_ml_probas):
@@ -2620,6 +2643,27 @@ def run_live(test_dry_run: bool = False):
                         n_pending_now = len(mt5_exec.get_pending_orders(magic=BOT_MAGIC))
                         if n_open_now + n_pending_now >= MAX_CONCURRENT:
                             break
+
+                        # CAP INVERSE : si setup INVERSE, verifie qu'on a pas depasse INVERSE_MAX_OPEN
+                        is_inverse_setup = setup.get("inverse", False)
+                        if is_inverse_setup:
+                            INVERSE_MAGIC = 19999
+                            try:
+                                import MetaTrader5 as _mt5
+                                _positions = _mt5.positions_get() or []
+                                _inverse_open = sum(1 for p in _positions if getattr(p, "magic", 0) == INVERSE_MAGIC)
+                            except Exception:
+                                _inverse_open = 0
+                            _inverse_max = int(os.environ.get("INVERSE_MAX_OPEN", "10"))
+                            if _inverse_open >= _inverse_max:
+                                log.info(
+                                    f"INVERSE CAP {asset} skip : {_inverse_open}/{_inverse_max} positions inverses ouvertes"
+                                )
+                                continue
+                            log.info(
+                                f"INVERSE TRADE accepted {asset} proba={setup['proba']:.3f} "
+                                f"({_inverse_open + 1}/{_inverse_max})"
+                            )
 
                         execute_setup(mt5_exec, state, setup, balance)
                         # Une fois un setup execute pour cet actif, on passe au suivant
