@@ -70,9 +70,14 @@ from bot_v2.push_dashboard import DashboardPusher
 
 # ============ Configuration ============
 ASSETS = [
+    # 13 actifs principaux
     "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD",
     "AUDUSD", "USDJPY", "SP500", "DJ30", "FRA40", "USDCAD", "USDCHF",
-    "NZDUSD", "XAGUSD",  # actifs V19 supplementaires dispo sur Vantage demo
+    # 14 actifs V19 supplementaires (Vantage demo, necessite symbol_select au boot)
+    "NZDUSD", "XAGUSD", "ETHUSD", "USDMXN", "USDZAR",
+    "CL-OIL", "GAS-C", "HK50", "UK100", "BVSPX",
+    "Coffee-C", "Cocoa-C", "Wheat-C", "Sugar-C",
+    # Nikkei225 absent du broker Vantage (pas de JP225/JPN225/NIK225)
 ]
 
 THRESHOLD = float(os.environ["BOT_THRESHOLD"])
@@ -324,6 +329,17 @@ def main():
     log.info(f"MT5 connecte : login={mt5_exec.account_info.login} server={mt5_exec.account_info.server}")
     log.info(f"  Balance : {mt5_exec.account_info.balance} {mt5_exec.account_info.currency}")
     log.info(f"  Trade mode : {mt5_exec.account_info.trade_mode} (0=demo, 2=real)")
+
+    # Force symbol_select sur tous les actifs (sinon symbol_info_tick = bid=0)
+    activated, skipped = [], []
+    for a in ASSETS:
+        if mt5.symbol_select(a, True):
+            activated.append(a)
+        else:
+            skipped.append(a)
+    log.info(f"  Symbols actives : {len(activated)}/{len(ASSETS)}")
+    if skipped:
+        log.warning(f"  Symbols KO (introuvables broker) : {skipped}")
 
     # 3. Init dashboard pusher
     session_id = uuid.uuid4().hex[:8]
