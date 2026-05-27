@@ -591,14 +591,11 @@ def compute_asset(payload: dict) -> dict:
         # un OB qui n'a pas fill en 30min (NO_FILL). Au-dela, mouvement consomme,
         # contexte change -> SL frequents (cf 9 LOSS / 12 trades du 22/05).
         now = df_m1.index[-1]
-        # V15 FIX (2026-05-25, user) : PAS DE TIMER. On ne scanne QUE les OB
-        # dont la validation == derniere bougie (ou la precedente, tolerance 1
-        # bougie en cas de cycle rate). Le filtre evaluated_keys garantit ensuite
-        # qu'un OB n'est evalue qu'une seule fois.
-        # Logique pure : "3 bougies baissieres + bougie haussiere qui comble"
-        # = nouvel OB -> 1 calcul ML -> decision. Pas de rattrapage retroactif
-        # des OB anciens.
-        _tol_cutoff = now - pd.Timedelta(minutes=1)
+        # V19.2 FIX (2026-05-27) : tolerance 1min filtrait 100% des OBs (rares
+        # validations a la seconde exacte du scan). On revient a 60min comme
+        # le V17 du VPS qui generait des rejets toutes les minutes.
+        # evaluated_keys garantit qu'un OB ne soit evalue qu'une seule fois.
+        _tol_cutoff = now - pd.Timedelta(minutes=60)
         obs_recent = [
             ob for ob in obs_confirmed
             if ob.validation_index is not None

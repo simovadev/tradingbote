@@ -849,9 +849,28 @@ def _features_from_result(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_s
     return f
 
 
-def predict_proba(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None) -> float:
-    """Retourne la probabilite de WIN [0,1] selon le modele specifique a l'actif."""
-    # Multi-asset (user 2026-05-16) : utilise le modele par instrument si dispo
+def predict_proba(r, ob, instrument: str, df_ltf=None, df_d1=None, mss_setups=None, df_htf=None, df_h1=None) -> float:
+    """Retourne la probabilite de WIN [0,1] selon le modele specifique a l'actif.
+
+    V19 (2026-05-27) : si modele V19 PyTorch dispo (v19_best.pt), il prend la priorite
+    sur LightGBM. Sinon fallback sur LightGBM V17/V18.
+    """
+    # V19 PyTorch en priorite (si dispo)
+    try:
+        from bot_v2.v19_inference import predict_proba_v19, is_v19_available
+        if is_v19_available() and df_ltf is not None:
+            proba_v19 = predict_proba_v19(
+                r, ob, instrument,
+                df_m1=df_ltf, df_m15=df_htf, df_h1=df_h1,
+                df_d1=df_d1, mss_setups=mss_setups,
+            )
+            if proba_v19 is not None:
+                return float(proba_v19)
+    except Exception:
+        # Si V19 fail, on tombe silencieusement sur LightGBM
+        pass
+
+    # Fallback LightGBM V17/V18 (comportement V18 original)
     loaded = load_model_for_instrument(instrument)
     if loaded is not None:
         model, features = loaded
