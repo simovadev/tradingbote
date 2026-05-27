@@ -57,6 +57,13 @@ os.environ.setdefault(
     "https://tradingbote-production.up.railway.app/api/ingest",
 )
 
+# INVERSE_TRADE_MODE (2026-05-27, user idea):
+# Force activation via setdefault. Si l'env est deja set, on respecte.
+# Sinon par defaut on active (1) avec seuil 0.20 et cap 10 positions.
+os.environ.setdefault("INVERSE_TRADE_MODE", "1")
+os.environ.setdefault("INVERSE_THR", "0.20")
+os.environ.setdefault("INVERSE_MAX_OPEN", "10")
+
 import pandas as pd
 
 from bot_v2 import ml_filter
@@ -2208,12 +2215,20 @@ def run_live(test_dry_run: bool = False):
     import uuid
     global _PUSHER
     _session_id = uuid.uuid4().hex[:8]
+    _dash_url = os.getenv("DASHBOARD_URL")
+    log.info(f"DASHBOARD CONFIG : url={_dash_url}, session={_session_id}")
     _PUSHER = DashboardPusher(
-        url=os.getenv("DASHBOARD_URL"),
+        url=_dash_url,
         session_id=_session_id,
     )
     PUSHER = _PUSHER  # alias local pour le reste de run_live
+    log.info(f"DashboardPusher state : url={PUSHER.url}, running={PUSHER._running}")
     PUSHER.push_start(f"Bot demarre (dry_run={test_dry_run})")
+    log.info(f"DashboardPusher push_start envoye")
+
+    # Log inverse mode config
+    _inv_mode = os.environ.get("INVERSE_TRADE_MODE", "0") == "1"
+    log.info(f"INVERSE_TRADE_MODE : {_inv_mode} (thr={os.environ.get('INVERSE_THR', 'NA')}, max_open={os.environ.get('INVERSE_MAX_OPEN', 'NA')})")
 
     mt5_exec = MT5Executor()
     if not mt5_exec.initialize():
