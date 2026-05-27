@@ -81,6 +81,7 @@ BROKER_MAP = {
     "AUDUSD":    "AUDUSD+",
     "NZDUSD":    "NZDUSD+",
     "USDMXN":    "USDMXN+",
+    "BTCUSD":    "BTCUSD",
     "ETHUSD":    "ETHUSD",
     "CL-OIL":    "CL-OIL",
     "NAS100":    "NAS100",
@@ -97,7 +98,13 @@ BROKER_MAP = {
     "Coffee-C":  "Coffee-C",
     "Cocoa-C":   "Cocoa-C",
     "Sugar-C":   "Sugar-C",
-    # KO sur compte RAW : BTCUSD (INVALID_STOPS), USDZAR (INVALID_STOPS), Wheat-C (MARKET_CLOSED)
+    # KO sur compte RAW : USDZAR (INVALID_STOPS), Wheat-C (MARKET_CLOSED)
+}
+
+# Actifs qui necessitent un SL min plus large que trade_stops_level (broker ment)
+# Format : asset -> SL min en % du prix
+MIN_SL_PCT = {
+    "BTCUSD": 0.001,  # 0.1% du prix BTC (broker dit 0 mais rejette < 0.1%)
 }
 
 # ASSETS = noms V19 (utilises pour V19Predictor + features). Lookup MT5 via BROKER_MAP.
@@ -298,10 +305,25 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
             return False
 
         # Respect stop-level broker (distance min SL/TP en points)
+        # Plus : MIN_SL_PCT pour les actifs ou le broker ment (BTC stops_level=0)
         stops_level = getattr(info, "trade_stops_level", 0) * info.point
-        if stops_level > 0 and sl_distance < stops_level:
-            log.warning(f"{asset} SL trop pres ({sl_distance:.5f} < min {stops_level:.5f}) : skip")
-            return False
+        min_pct = MIN_SL_PCT.get(asset)
+        if min_pct:
+            min_dist_pct = market_price * min_pct
+            min_required = max(stops_level, min_dist_pct)
+        else:
+            min_required = stops_level
+        if min_required > 0 and sl_distance < min_required:
+            # Elargit SL au minimum requis (au lieu de skip) - garde le ratio TP
+            sl_extra = min_required - sl_distance
+            if direction == "bullish":
+                sl = sl - sl_extra
+                tp = tp + sl_extra * rr
+            else:
+                sl = sl + sl_extra
+                tp = tp - sl_extra * rr
+            sl_distance = abs(market_price - sl)
+            log.info(f"{asset} SL elargi a {sl_distance:.5f} (min broker {min_required:.5f})")
 
         n_ticks = sl_distance / tick_size
         risk_per_lot = n_ticks * tick_value
