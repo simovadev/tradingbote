@@ -1119,7 +1119,48 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
 
         proba = predict_proba(model, features, r, ob, instrument, df_ltf=df_m1, df_d1=df_d1, mss_setups=mss_setups)
         diag_ml_probas.append(proba)
+
+        # INVERSE_TRADE_MODE (2026-05-27, user idea):
+        # Si proba TRES BASSE (< INVERSE_THR, default 0.20), on TRADE en sens INVERSE.
+        # Le ML est tres sur que c'est un mauvais setup -> on parie l'inverse.
+        # SL et TP sont swappes (le SL devient le TP, et vice versa).
+        # RR effectif inverse = 1/RR (si RR original 2.0 -> RR inverse 0.5).
+        # Cap : max 10 positions inverses ouvertes simultanement (env INVERSE_MAX_OPEN).
+        inverse_thr = float(os.environ.get("INVERSE_THR", "0.20"))
+        inverse_mode = os.environ.get("INVERSE_TRADE_MODE", "0") == "1"
+
         if proba < threshold:
+            # Mode inverse : si proba < seuil ET tres basse, on trade en sens inverse
+            if inverse_mode and proba < inverse_thr:
+                # Compte positions inverses actuellement ouvertes via MT5 + magic
+                # Le magic INVERSE_MAGIC = 19999 (toutes positions inverses)
+                inverse_open = 0
+                try:
+                    import MetaTrader5 as _mt5
+                    positions = _mt5.positions_get()
+                    if positions:
+                        INVERSE_MAGIC = 19999
+                        inverse_open = sum(1 for p in positions if getattr(p, "magic", 0) == INVERSE_MAGIC)
+                except Exception:
+                    pass
+                inverse_max = int(os.environ.get("INVERSE_MAX_OPEN", "10"))
+                if inverse_open >= inverse_max:
+                    log.info(f"INVERSE {instrument} {ob.direction} skip : cap {inverse_max} atteint ({inverse_open} open)")
+                    diag_reasons["inverse_cap_reached"] = diag_reasons.get("inverse_cap_reached", 0) + 1
+                    continue
+                log.info(f"INVERSE TRADE {instrument} : proba={proba:.3f} < {inverse_thr} -> trade SENS INVERSE (open={inverse_open}/{inverse_max})")
+                valid_setups.append({
+                    "instrument": instrument,
+                    "ts": df_m1.index[ob.validation_index],
+                    "ob": ob,
+                    "r": r,
+                    "proba": proba,
+                    "df_m1": df_m1,
+                    "inverse": True,
+                })
+                diag_reasons["inverse_taken"] = diag_reasons.get("inverse_taken", 0) + 1
+                continue
+            # Sinon (zone d'incertitude 0.20-0.65) : skip normal
             state.log_rejected(instrument, df_m1.index[ob.validation_index],
                               ob.direction, f"ml_below_thr_{proba:.3f}",
                               ml_proba=proba, score=r.score)
@@ -1142,6 +1183,7 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
             "r": r,
             "proba": proba,
             "df_m1": df_m1,
+            "inverse": False,
         })
 
     if debug_diag and (diag_reasons or diag_ml_probas):
@@ -1171,6 +1213,43 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     r = setup_dict["r"]
     ob = setup_dict["ob"]
     setup = r.trade_setup
+    is_inverse = setup_dict.get("inverse", False)
+
+    # INVERSE_TRADE_MODE (2026-05-27, user idea):
+    # Si le ML est sur que c'est mauvais (proba < 0.20), on SWAP direction + SL/TP.
+    # SL devient l'ancien TP (loin), TP devient l'ancien SL (proche).
+    # On parie que le marche ira en sens inverse comme le ML predit.
+    if is_inverse:
+        from bot_v2.concepts.setup_quality import TradeSetup
+        old_dir = setup.direction
+        old_entry = float(setup.entry_price)
+        old_sl = float(setup.stop_loss)
+        old_tp = float(setup.take_profit)
+        # SWAP direction
+        new_dir = "bearish" if old_dir == "bullish" else "bullish"
+        # SWAP SL/TP : nouveau SL = ancien TP, nouveau TP = ancien SL
+        new_sl = old_tp
+        new_tp = old_sl
+        # Construit un nouveau setup (mutation in-place pour conserver les autres champs)
+        try:
+            setup.direction = new_dir
+            setup.stop_loss = new_sl
+            setup.take_profit = new_tp
+            # Recalcule rr/risk/reward
+            risk = abs(old_entry - new_sl)
+            reward = abs(old_entry - new_tp)
+            setup.risk_points = float(risk)
+            setup.reward_points = float(reward)
+            setup.rr = float(reward / risk) if risk > 0 else 0.5
+        except Exception as e:
+            log.error(f"INVERSE setup swap failed {instrument}: {e}")
+            return False
+        log.info(
+            f"INVERSE EXECUTE {instrument} : "
+            f"{old_dir}->{new_dir} | entry={old_entry:.5f} | "
+            f"SL {old_sl:.5f}->{new_sl:.5f} | TP {old_tp:.5f}->{new_tp:.5f} | "
+            f"RR={setup.rr:.2f}"
+        )
 
     # === Age du setup ===
     # FIX V11.2 (2026-05-22) : seuil age max ALIGNE SUR LE OOS.
@@ -1449,14 +1528,18 @@ def execute_setup(mt5_exec: MT5Executor, state: LiveState, setup_dict: dict,
     # correcte sur 5/5 trades valides, mais LIMIT a ob_high rate 4/5 setups
     # car le mouvement directionnel part sans retest (selection bias inverse).
     # MARKET = entree immediate au prix marche, capture le mouvement directionnel.
+    # INVERSE TRADE : magic special pour distinguer + cap counting
+    INVERSE_MAGIC = 19999
+    used_magic = INVERSE_MAGIC if is_inverse else BOT_MAGIC
+    comment_tag = "INV" if is_inverse else "V12-MKT"
     result = mt5_exec.place_market_order(
         symbol=instrument,
         direction=setup.direction,
         volume=lots,
         sl=sl_price,
         tp=tp_price,
-        comment=f"V12-MKT-{ob.direction[0].upper()} ml={setup_dict['proba']:.2f}",
-        magic=BOT_MAGIC,
+        comment=f"{comment_tag}-{setup.direction[0].upper()} ml={setup_dict['proba']:.2f}",
+        magic=used_magic,
     )
 
     if result is None:
