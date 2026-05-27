@@ -1,0 +1,489 @@
+"""LIVE RUNNER V19 — bot dedie au Deep Learning V19.
+
+Design propre, focalise V19 :
+- V19Predictor (PyTorch) en moteur principal
+- MT5 demo Vantage en execution
+- DashboardPusher (Railway) pour le monitoring
+- Mode INVERSE optionnel (env INVERSE_TRADE_MODE=1)
+- 1 cycle = 1 scan/minute (sync M1 close)
+- 1 OB valide = 1 prediction V19 = 1 decision
+
+Pas de cascade compliquee, pas de ProcessPool, pas de modeles legacy.
+Simple, lisible, testable.
+
+Configuration via env :
+- DASHBOARD_URL : URL Railway (push events)
+- INVERSE_TRADE_MODE : 1 = active mode inverse (proba < 0.20 -> trade inverse)
+- INVERSE_THR : seuil inverse (default 0.20)
+- INVERSE_MAX_OPEN : cap positions inverses simultanees (default 10)
+- BOT_THRESHOLD : seuil ML pour trade normal (default 0.65)
+- RECENT_CUTOFF_MIN : age max d'un OB pour etre evalue (default 60)
+
+Usage : python -m bot_v2.live_runner_v19
+"""
+from __future__ import annotations
+
+# CRITIQUE Windows : torch en premier avant tout bot_v2.*
+import torch as _TORCH_EAGER
+
+import os
+import sys
+import time
+import json
+import logging
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import MetaTrader5 as mt5
+
+# ROOT du projet
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+# Defaults env (setdefault = respecte l'env si deja defini)
+os.environ.setdefault("DASHBOARD_URL", "https://tradingbote-production.up.railway.app/api/ingest")
+os.environ.setdefault("INVERSE_TRADE_MODE", "0")
+os.environ.setdefault("INVERSE_THR", "0.20")
+os.environ.setdefault("INVERSE_MAX_OPEN", "10")
+os.environ.setdefault("BOT_THRESHOLD", "0.65")
+os.environ.setdefault("RECENT_CUTOFF_MIN", "60")
+
+# ============ Logging ============
+log = logging.getLogger("live_v19")
+log.setLevel(logging.INFO)
+_fh = logging.FileHandler(ROOT / "live_v19.log", mode="a", encoding="utf-8")
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+log.addHandler(_fh)
+_sh = logging.StreamHandler()
+_sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+log.addHandler(_sh)
+
+
+# ============ Imports bot_v2 (apres torch+env) ============
+from bot_v2.config import INSTRUMENTS, SMT_PAIRS, get_param
+from bot_v2.concepts.order_block import detect_order_blocks
+from bot_v2.concepts.killzones import killzone_at
+from bot_v2.concepts.fvg import detect_fvg
+from bot_v2.concepts.structure import detect_structure_breaks
+from bot_v2.concepts.liquidity import find_swings
+from bot_v2.concepts.mss_setup import detect_mss_setups
+from bot_v2.concepts.daily_bias import build_d1_from_h1
+from bot_v2.pipeline import evaluate_ob
+from bot_v2.mt5_executor import MT5Executor
+from bot_v2.v19_inference import V19Predictor, predict_proba_v19, is_v19_available
+from bot_v2.push_dashboard import DashboardPusher
+
+
+# ============ Configuration ============
+ASSETS = [
+    "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD",
+    "AUDUSD", "USDJPY", "SP500", "DJ30", "FRA40", "USDCAD", "USDCHF",
+]
+
+THRESHOLD = float(os.environ["BOT_THRESHOLD"])
+INVERSE_MODE = os.environ["INVERSE_TRADE_MODE"] == "1"
+INVERSE_THR = float(os.environ["INVERSE_THR"])
+INVERSE_MAX_OPEN = int(os.environ["INVERSE_MAX_OPEN"])
+RECENT_CUTOFF_MIN = int(os.environ["RECENT_CUTOFF_MIN"])
+
+BOT_MAGIC = 12345          # ordres normaux
+INVERSE_MAGIC = 19999      # ordres inverses (compte separe + cap)
+
+MAX_CONCURRENT_TRADES = 5  # cap global ordres simultanes
+
+
+# ============ State global ============
+_seen_obs: set[tuple] = set()  # (asset, ts_ob) deja traites pour pas re-trader
+
+
+# ============ Fetch data ============
+def fetch_ohlcv(asset: str, tf, n: int = 500) -> pd.DataFrame | None:
+    """Recupere les N dernieres bougies d'un actif."""
+    rates = mt5.copy_rates_from_pos(asset, tf, 0, n)
+    if rates is None or len(rates) == 0:
+        return None
+    df = pd.DataFrame(rates)
+    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    df = df.rename(columns={"tick_volume": "volume"})
+    return df.set_index("time").sort_index()
+
+
+# ============ Pipeline V19 par actif ============
+def process_asset(asset: str, predictor: V19Predictor | None,
+                   pusher: DashboardPusher, mt5_exec: MT5Executor,
+                   balance: float, n_inverse_open: int) -> dict:
+    """Scan + predict V19 + trade decision pour 1 actif.
+
+    Returns dict avec stats : {asset, n_obs, rejets, setups, trades_taken}
+    """
+    res = {"asset": asset, "n_obs": 0, "rejets": [], "setups": [],
+           "trades_taken": 0, "errors": []}
+
+    try:
+        # 1. Fetch data multi-TF
+        df_m1 = fetch_ohlcv(asset, mt5.TIMEFRAME_M1, 500)
+        df_m15 = fetch_ohlcv(asset, mt5.TIMEFRAME_M15, 200)
+        df_h1 = fetch_ohlcv(asset, mt5.TIMEFRAME_H1, 200)
+        df_d1 = fetch_ohlcv(asset, mt5.TIMEFRAME_D1, 60)
+
+        if df_m1 is None or len(df_m1) < 100:
+            res["errors"].append("M1 insuffisant")
+            return res
+
+        # 2. Detect OBs
+        swing_strength = get_param(asset, "swing_strength_m1", 2)
+        obs = detect_order_blocks(df_m1, swing_strength=swing_strength)
+
+        # Filtre OBs recents (validation_ts >= last_bar - RECENT_CUTOFF_MIN)
+        last_bar = df_m1.index[-1]
+        cutoff = last_bar - pd.Timedelta(minutes=RECENT_CUTOFF_MIN)
+        obs_recent = [
+            ob for ob in obs
+            if ob.validation_ts is not None
+            and ob.validation_ts >= cutoff
+            and ob.validation_ts <= last_bar
+        ]
+        res["n_obs"] = len(obs_recent)
+
+        if not obs_recent:
+            return res
+
+        # 3. Pour chaque OB recent, evalue
+        for ob in obs_recent:
+            ob_key = (asset, ob.validation_ts.isoformat(), ob.direction)
+            if ob_key in _seen_obs:
+                continue  # deja traite
+
+            try:
+                r = evaluate_ob(
+                    ob, df_m1, df_m15, df_d1,
+                    instrument=asset,
+                    df_htf2=df_h1, htf2_name="H1",
+                )
+                if r is None or r.verdict != "TRADE" or r.trade_setup is None:
+                    reason = r.rejection_reason if r else "no_result"
+                    _seen_obs.add(ob_key)
+                    res["rejets"].append({"asset": asset, "ts": ob.validation_ts,
+                                           "direction": ob.direction, "reason": reason or "no_trade"})
+                    continue
+
+                # 4. PREDICT V19 (ou fallback)
+                proba = None
+                if predictor is not None:
+                    try:
+                        proba = predict_proba_v19(
+                            r, ob, asset,
+                            df_m1=df_m1, df_m15=df_m15, df_h1=df_h1,
+                            df_d1=df_d1, mss_setups=None,
+                        )
+                    except Exception as e:
+                        res["errors"].append(f"V19 predict {asset}: {e}")
+
+                if proba is None:
+                    # V19 fail / indispo : on skip ce trade (mode V19 only)
+                    _seen_obs.add(ob_key)
+                    res["rejets"].append({"asset": asset, "ts": ob.validation_ts,
+                                           "direction": ob.direction, "reason": "V19_unavailable"})
+                    continue
+
+                # 5. Decision
+                _seen_obs.add(ob_key)
+                kz = killzone_at(ob.validation_ts) or "None"
+                setup = r.trade_setup
+
+                # Push REJECTED ou SETUP au dashboard
+                if proba >= THRESHOLD:
+                    # Trade NORMAL
+                    pusher.push_setup(
+                        instrument=asset, ts=ob.validation_ts,
+                        direction=ob.direction,
+                        entry_price=setup.entry_price,
+                        sl=setup.stop_loss, tp=setup.take_profit,
+                        rr=setup.rr, score=r.score or 0,
+                        ml_proba=proba, killzone=kz,
+                    )
+                    if execute_trade(mt5_exec, asset, setup, proba, balance,
+                                      ob, kz, pusher, is_inverse=False):
+                        res["trades_taken"] += 1
+                    res["setups"].append({"asset": asset, "proba": proba, "inverse": False})
+
+                elif INVERSE_MODE and proba < INVERSE_THR:
+                    # Trade INVERSE
+                    if n_inverse_open >= INVERSE_MAX_OPEN:
+                        res["rejets"].append({"asset": asset, "ts": ob.validation_ts,
+                                               "direction": ob.direction,
+                                               "reason": f"inverse_cap_{INVERSE_MAX_OPEN}",
+                                               "proba": proba})
+                        continue
+                    if execute_trade(mt5_exec, asset, setup, proba, balance,
+                                      ob, kz, pusher, is_inverse=True):
+                        res["trades_taken"] += 1
+                        n_inverse_open += 1
+                    res["setups"].append({"asset": asset, "proba": proba, "inverse": True})
+
+                else:
+                    # Zone d'incertitude : skip + log REJECTED
+                    res["rejets"].append({
+                        "asset": asset, "ts": ob.validation_ts,
+                        "direction": ob.direction,
+                        "reason": f"ml_below_thr_{proba:.3f}",
+                        "proba": proba,
+                        "threshold": THRESHOLD,
+                        "entry": setup.entry_price,
+                        "sl": setup.stop_loss, "tp": setup.take_profit, "rr": setup.rr,
+                    })
+            except Exception as e:
+                res["errors"].append(f"OB process fail {asset}: {type(e).__name__}: {str(e)[:100]}")
+
+    except Exception as e:
+        res["errors"].append(f"asset {asset} fail: {type(e).__name__}: {str(e)[:100]}")
+
+    return res
+
+
+# ============ Execution MT5 ============
+def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
+                   balance: float, ob, killzone: str,
+                   pusher: DashboardPusher, is_inverse: bool = False) -> bool:
+    """Place un ordre MT5 (market). Si is_inverse : swap direction + SL/TP."""
+    try:
+        direction = setup.direction
+        sl = float(setup.stop_loss)
+        tp = float(setup.take_profit)
+        entry = float(setup.entry_price)
+        rr = float(setup.rr)
+
+        if is_inverse:
+            # SWAP direction + SL/TP
+            direction = "bearish" if direction == "bullish" else "bullish"
+            new_sl = tp  # ancien TP devient nouveau SL
+            new_tp = sl  # ancien SL devient nouveau TP
+            sl, tp = new_sl, new_tp
+            rr = abs(entry - tp) / abs(entry - sl) if abs(entry - sl) > 0 else 0.5
+
+        # Calcul lots basique : 1% risk sur balance
+        risk_pct = 0.01
+        risk_eur = balance * risk_pct
+        info = mt5.symbol_info(asset)
+        if info is None:
+            log.error(f"{asset} : symbol_info None")
+            return False
+
+        # Distance SL en points
+        tick_value = getattr(info, "trade_tick_value", 1.0)
+        tick_size = getattr(info, "trade_tick_size", 0.01)
+        # Prix marche actuel
+        tick = mt5.symbol_info_tick(asset)
+        if tick is None:
+            log.error(f"{asset} : tick None")
+            return False
+        market_price = tick.ask if direction == "bullish" else tick.bid
+        sl_distance = abs(market_price - sl)
+        if sl_distance <= 0:
+            log.warning(f"{asset} sl_distance=0, skip")
+            return False
+        n_ticks = sl_distance / tick_size
+        risk_per_lot = n_ticks * tick_value
+        if risk_per_lot <= 0:
+            return False
+
+        lots = risk_eur / risk_per_lot
+        lots = max(info.volume_min, round(lots / info.volume_step) * info.volume_step)
+        lots = min(lots, info.volume_max)
+
+        # Place ordre
+        magic = INVERSE_MAGIC if is_inverse else BOT_MAGIC
+        comment = f"V19{'-INV' if is_inverse else ''}-{direction[0].upper()} ml={proba:.2f}"
+
+        result = mt5_exec.place_market_order(
+            symbol=asset, direction=direction, volume=lots,
+            sl=sl, tp=tp, comment=comment, magic=magic,
+        )
+        if result is None:
+            log.warning(f"{asset} : ordre rejete par MT5")
+            return False
+
+        log.info(
+            f"TRADE OK {asset} {direction} {'(INVERSE)' if is_inverse else ''} "
+            f"entry={result['price']:.5f} SL={sl:.5f} TP={tp:.5f} "
+            f"vol={result['volume']:.2f} rr={rr:.2f} ml={proba:.3f}"
+        )
+
+        # Push trade au dashboard
+        pusher.push_trade_executed(
+            instrument=asset, ticket=result["ticket"],
+            direction=direction, entry=result["price"],
+            sl=sl, tp=tp, volume=result["volume"],
+            rr=rr, ml_proba=proba, score=0,
+            killzone=killzone,
+        )
+        return True
+    except Exception as e:
+        log.exception(f"execute_trade fail {asset}: {e}")
+        return False
+
+
+# ============ Main loop ============
+def main():
+    log.info("=" * 60)
+    log.info("BOT V19 LIVE - DEEP LEARNING ICT")
+    log.info("=" * 60)
+    log.info(f"THRESHOLD = {THRESHOLD}")
+    log.info(f"INVERSE_MODE = {INVERSE_MODE} (thr={INVERSE_THR}, max_open={INVERSE_MAX_OPEN})")
+    log.info(f"RECENT_CUTOFF_MIN = {RECENT_CUTOFF_MIN}")
+    log.info(f"ASSETS = {ASSETS}")
+
+    # 1. Charge V19
+    log.info("Chargement V19 model...")
+    predictor = V19Predictor.get_instance()
+    if predictor is None:
+        log.error("V19 model INDISPONIBLE - bot ne demarre pas")
+        return
+    log.info(f"V19 OK : device={predictor.device}, n_assets={predictor.n_assets}, n_ict={predictor.n_ict}")
+
+    # 2. Init MT5
+    mt5_exec = MT5Executor()
+    if not mt5_exec.initialize():
+        log.error(f"MT5 init failed : {mt5.last_error()}")
+        return
+    log.info(f"MT5 connecte : login={mt5_exec.account_info.login} server={mt5_exec.account_info.server}")
+    log.info(f"  Balance : {mt5_exec.account_info.balance} {mt5_exec.account_info.currency}")
+    log.info(f"  Trade mode : {mt5_exec.account_info.trade_mode} (0=demo, 2=real)")
+
+    # 3. Init dashboard pusher
+    session_id = uuid.uuid4().hex[:8]
+    pusher = DashboardPusher(
+        url=os.getenv("DASHBOARD_URL"),
+        session_id=session_id,
+    )
+    log.info(f"DashboardPusher : url={pusher.url}, session={session_id}")
+    pusher.push_start(f"Bot V19 demarre (inverse={INVERSE_MODE})")
+
+    log.info("=" * 60)
+    log.info("DEMARRAGE BOUCLE PRINCIPALE - 1 cycle/min")
+    log.info("=" * 60)
+
+    cycle_n = 0
+    try:
+        while True:
+            cycle_n += 1
+            t0 = time.time()
+            now = datetime.now(timezone.utc)
+
+            # Compte positions inverses ouvertes
+            positions = mt5.positions_get() or []
+            n_inverse_open = sum(1 for p in positions if getattr(p, "magic", 0) == INVERSE_MAGIC)
+            n_total_open = len(positions)
+
+            # Refresh balance
+            account = mt5.account_info()
+            balance = account.balance if account else 0
+            equity = account.equity if account else 0
+
+            log.info(f"--- CYCLE {cycle_n} | T={now.strftime('%H:%M:%S')} UTC | balance={balance:.2f} | open={n_total_open} (inv={n_inverse_open}) ---")
+
+            # Process tous les actifs sequentiellement
+            all_rejets = []
+            all_setups = []
+            total_obs = 0
+            total_trades = 0
+
+            for asset in ASSETS:
+                res = process_asset(asset, predictor, pusher, mt5_exec,
+                                     balance, n_inverse_open)
+                total_obs += res["n_obs"]
+                total_trades += res["trades_taken"]
+                all_rejets.extend(res["rejets"])
+                all_setups.extend(res["setups"])
+                if res["errors"]:
+                    for e in res["errors"]:
+                        log.warning(f"  {asset} : {e}")
+
+            elapsed = time.time() - t0
+            log.info(f"  Total : {total_obs} OBs | {len(all_setups)} setups | {len(all_rejets)} rejets | {total_trades} trades (cycle {elapsed:.1f}s)")
+
+            # Push CYCLE + STATS
+            pusher.push_cycle(
+                actifs_scanned=len(ASSETS),
+                total_s=elapsed, fetch_s=0, compute_s=elapsed,
+                latencies={a: 0 for a in ASSETS},
+                last_bar_ts=now,
+            )
+
+            stats = mt5_exec.get_stats() if hasattr(mt5_exec, "get_stats") else {}
+            pusher.push_stats(
+                total=stats.get("total", 0),
+                wins=stats.get("wins", 0),
+                losses=stats.get("losses", 0),
+                wr_pct=stats.get("wr_pct", 0),
+                pnl_total=stats.get("pnl_total", 0),
+                balance=balance, equity=equity,
+                positions_open=n_total_open, pending_orders=0,
+            )
+
+            # Push REJECTED batch (avec filtre 30min)
+            if all_rejets:
+                _real_cutoff = now - pd.Timedelta(minutes=30)
+                _filtered = []
+                for r in all_rejets:
+                    ts = r.get("ts")
+                    if hasattr(ts, "tz_localize"):
+                        if ts.tz is None:
+                            ts = ts.tz_localize("UTC")
+                    try:
+                        if ts >= _real_cutoff:
+                            _filtered.append({
+                                "instrument": r["asset"],
+                                "ts": str(r["ts"]),
+                                "direction": r.get("direction", "?"),
+                                "reason": r.get("reason", "?"),
+                                "ml_proba": r.get("proba"),
+                                "threshold": r.get("threshold"),
+                                "entry": r.get("entry"),
+                                "sl": r.get("sl"),
+                                "tp": r.get("tp"),
+                                "rr": r.get("rr"),
+                            })
+                    except Exception:
+                        pass
+                if _filtered:
+                    pusher.push_rejected_batch(_filtered)
+                    log.info(f"  Pushed {len(_filtered)} rejets au dashboard")
+
+            # Cleanup _seen_obs vieux (> 2h)
+            if cycle_n % 30 == 0:
+                cutoff_2h = now - pd.Timedelta(hours=2)
+                _seen_obs_copy = set()
+                for k in _seen_obs:
+                    try:
+                        if pd.Timestamp(k[1]) >= cutoff_2h:
+                            _seen_obs_copy.add(k)
+                    except Exception:
+                        _seen_obs_copy.add(k)
+                _seen_obs.clear()
+                _seen_obs.update(_seen_obs_copy)
+                log.info(f"  Cleanup _seen_obs : {len(_seen_obs)} entries gardees")
+
+            # Wait next minute boundary
+            next_minute = (now + pd.Timedelta(minutes=1)).replace(second=0, microsecond=0)
+            sleep_s = max(1, (next_minute - datetime.now(timezone.utc)).total_seconds())
+            time.sleep(sleep_s)
+
+    except KeyboardInterrupt:
+        log.info("CTRL+C recu, shutdown propre")
+    except Exception as e:
+        log.exception(f"FATAL : {e}")
+        pusher.push_error(f"Bot crash: {type(e).__name__}: {e}")
+    finally:
+        pusher.push_stop("Bot arrete")
+        pusher.shutdown()
+        mt5.shutdown()
+        log.info("Bot V19 arrete proprement")
+
+
+if __name__ == "__main__":
+    main()
