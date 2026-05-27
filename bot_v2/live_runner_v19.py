@@ -265,8 +265,9 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
             sl, tp = new_sl, new_tp
             rr = abs(entry - tp) / abs(entry - sl) if abs(entry - sl) > 0 else 0.5
 
-        # Calcul lots basique : 1% risk sur balance
-        risk_pct = 0.01
+        # Risk 0.5% + cap dur a 2.0 lots (demo Vantage = stops invalides au-dela)
+        risk_pct = float(os.getenv("RISK_PCT", "0.005"))
+        lot_cap = float(os.getenv("LOT_CAP", "2.0"))
         risk_eur = balance * risk_pct
         info = mt5.symbol_info(asset)
         if info is None:
@@ -286,6 +287,13 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         if sl_distance <= 0:
             log.warning(f"{asset} sl_distance=0, skip")
             return False
+
+        # Respect stop-level broker (distance min SL/TP en points)
+        stops_level = getattr(info, "trade_stops_level", 0) * info.point
+        if stops_level > 0 and sl_distance < stops_level:
+            log.warning(f"{asset} SL trop pres ({sl_distance:.5f} < min {stops_level:.5f}) : skip")
+            return False
+
         n_ticks = sl_distance / tick_size
         risk_per_lot = n_ticks * tick_value
         if risk_per_lot <= 0:
@@ -293,7 +301,7 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
 
         lots = risk_eur / risk_per_lot
         lots = max(info.volume_min, round(lots / info.volume_step) * info.volume_step)
-        lots = min(lots, info.volume_max)
+        lots = min(lots, info.volume_max, lot_cap)
 
         # Place ordre
         magic = INVERSE_MAGIC if is_inverse else BOT_MAGIC
