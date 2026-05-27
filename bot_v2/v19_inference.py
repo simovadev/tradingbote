@@ -11,6 +11,18 @@ Le predictor :
 """
 from __future__ import annotations
 
+# CRITIQUE : torch DOIT etre importe EN PREMIER, avant tout autre import bot_v2.
+# Sur Windows, l'import bot_v2.* modifie le DLL search path et casse le chargement
+# des DLL torch (c10.dll, etc). Importer torch ici, au tout debut, garantit le bon
+# ordre quel que soit le caller.
+try:
+    import torch as _TORCH_EAGER
+    _TORCH_LOADED = True
+except Exception as _e:
+    _TORCH_EAGER = None
+    _TORCH_LOADED = False
+    _TORCH_ERROR = _e
+
 import json
 import sys
 from pathlib import Path
@@ -23,19 +35,18 @@ import pandas as pd
 ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, ROOT)
 
-# Lazy torch import (eviter crash si torch indisponible)
-_torch = None
+# Lazy V19ICTNet import (apres torch)
 _V19ICTNet = None
 
 
 def _ensure_torch():
-    global _torch, _V19ICTNet
-    if _torch is None:
-        import torch as _t
+    global _V19ICTNet
+    if not _TORCH_LOADED:
+        raise RuntimeError(f"Torch indisponible : {_TORCH_ERROR}")
+    if _V19ICTNet is None:
         from bot_v2.v19_model import V19ICTNet as _M
-        _torch = _t
         _V19ICTNet = _M
-    return _torch, _V19ICTNet
+    return _TORCH_EAGER, _V19ICTNet
 
 
 # Hyperparams identiques V19
