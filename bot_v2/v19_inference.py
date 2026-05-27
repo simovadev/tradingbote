@@ -19,7 +19,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-ROOT = "c:/Users/Shadow/TradingBot" if sys.platform == "win32" else "/workspace/TradingBot"
+# ROOT = dossier parent de bot_v2/ (relatif au fichier, marche partout)
+ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, ROOT)
 
 
