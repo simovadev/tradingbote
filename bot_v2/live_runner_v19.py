@@ -1,23 +1,17 @@
-"""LIVE RUNNER V19 — bot dedie au Deep Learning V19.
+"""LIVE RUNNER V19 - bot dedie au Deep Learning V19.
 
 Design propre, focalise V19 :
 - V19Predictor (PyTorch) en moteur principal
 - MT5 demo Vantage en execution
 - DashboardPusher (Railway) pour le monitoring
-- Mode INVERSE optionnel (env INVERSE_TRADE_MODE=1)
-- 1 cycle = 1 scan/minute (sync M1 close)
-- 1 OB valide = 1 prediction V19 = 1 decision
-
-Pas de cascade compliquee, pas de ProcessPool, pas de modeles legacy.
-Simple, lisible, testable.
+- 1 cycle = 1 scan/minute, 1 OB valide = 1 prediction V19 = 1 decision
 
 Configuration via env :
 - DASHBOARD_URL : URL Railway (push events)
-- INVERSE_TRADE_MODE : 1 = active mode inverse (proba < 0.20 -> trade inverse)
-- INVERSE_THR : seuil inverse (default 0.20)
-- INVERSE_MAX_OPEN : cap positions inverses simultanees (default 10)
-- BOT_THRESHOLD : seuil ML pour trade normal (default 0.65)
+- BOT_THRESHOLD : seuil ML pour trader (default 0.30)
 - RECENT_CUTOFF_MIN : age max d'un OB pour etre evalue (default 60)
+- RISK_PCT : risque par trade (default 0.005 = 0.5%)
+- LOT_CAP : cap dur sur taille de lot (default 2.0)
 
 Usage : python -m bot_v2.live_runner_v19
 """
@@ -46,10 +40,7 @@ sys.path.insert(0, str(ROOT))
 
 # Defaults env (setdefault = respecte l'env si deja defini)
 os.environ.setdefault("DASHBOARD_URL", "https://tradingbote-production.up.railway.app/api/ingest")
-os.environ.setdefault("INVERSE_TRADE_MODE", "0")
-os.environ.setdefault("INVERSE_THR", "0.20")
-os.environ.setdefault("INVERSE_MAX_OPEN", "10")
-os.environ.setdefault("BOT_THRESHOLD", "0.65")
+os.environ.setdefault("BOT_THRESHOLD", "0.30")
 os.environ.setdefault("RECENT_CUTOFF_MIN", "60")
 
 # ============ Logging ============
@@ -85,13 +76,9 @@ ASSETS = [
 ]
 
 THRESHOLD = float(os.environ["BOT_THRESHOLD"])
-INVERSE_MODE = os.environ["INVERSE_TRADE_MODE"] == "1"
-INVERSE_THR = float(os.environ["INVERSE_THR"])
-INVERSE_MAX_OPEN = int(os.environ["INVERSE_MAX_OPEN"])
 RECENT_CUTOFF_MIN = int(os.environ["RECENT_CUTOFF_MIN"])
 
-BOT_MAGIC = 12345          # ordres normaux
-INVERSE_MAGIC = 19999      # ordres inverses (compte separe + cap)
+BOT_MAGIC = 12345          # ordres normaux V19
 
 MAX_CONCURRENT_TRADES = 5  # cap global ordres simultanes
 
@@ -115,7 +102,7 @@ def fetch_ohlcv(asset: str, tf, n: int = 500) -> pd.DataFrame | None:
 # ============ Pipeline V19 par actif ============
 def process_asset(asset: str, predictor: V19Predictor | None,
                    pusher: DashboardPusher, mt5_exec: MT5Executor,
-                   balance: float, n_inverse_open: int) -> dict:
+                   balance: float) -> dict:
     """Scan + predict V19 + trade decision pour 1 actif.
 
     Returns dict avec stats : {asset, n_obs, rejets, setups, trades_taken}
@@ -197,7 +184,7 @@ def process_asset(asset: str, predictor: V19Predictor | None,
 
                 # Push REJECTED ou SETUP au dashboard
                 if proba >= THRESHOLD:
-                    # Trade NORMAL
+                    # Trade NORMAL (sens de l'OB)
                     pusher.push_setup(
                         instrument=asset, ts=ob.validation_ts,
                         direction=ob.direction,
@@ -207,26 +194,12 @@ def process_asset(asset: str, predictor: V19Predictor | None,
                         ml_proba=proba, killzone=kz,
                     )
                     if execute_trade(mt5_exec, asset, setup, proba, balance,
-                                      ob, kz, pusher, is_inverse=False):
+                                      ob, kz, pusher):
                         res["trades_taken"] += 1
-                    res["setups"].append({"asset": asset, "proba": proba, "inverse": False})
-
-                elif INVERSE_MODE and proba < INVERSE_THR:
-                    # Trade INVERSE
-                    if n_inverse_open >= INVERSE_MAX_OPEN:
-                        res["rejets"].append({"asset": asset, "ts": ob.validation_ts,
-                                               "direction": ob.direction,
-                                               "reason": f"inverse_cap_{INVERSE_MAX_OPEN}",
-                                               "proba": proba})
-                        continue
-                    if execute_trade(mt5_exec, asset, setup, proba, balance,
-                                      ob, kz, pusher, is_inverse=True):
-                        res["trades_taken"] += 1
-                        n_inverse_open += 1
-                    res["setups"].append({"asset": asset, "proba": proba, "inverse": True})
+                    res["setups"].append({"asset": asset, "proba": proba})
 
                 else:
-                    # Zone d'incertitude : skip + log REJECTED
+                    # Proba < THRESHOLD : skip + log REJECTED
                     res["rejets"].append({
                         "asset": asset, "ts": ob.validation_ts,
                         "direction": ob.direction,
@@ -248,22 +221,14 @@ def process_asset(asset: str, predictor: V19Predictor | None,
 # ============ Execution MT5 ============
 def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
                    balance: float, ob, killzone: str,
-                   pusher: DashboardPusher, is_inverse: bool = False) -> bool:
-    """Place un ordre MT5 (market). Si is_inverse : swap direction + SL/TP."""
+                   pusher: DashboardPusher) -> bool:
+    """Place un ordre MT5 (market) dans le sens de l'OB."""
     try:
         direction = setup.direction
         sl = float(setup.stop_loss)
         tp = float(setup.take_profit)
         entry = float(setup.entry_price)
         rr = float(setup.rr)
-
-        if is_inverse:
-            # SWAP direction + SL/TP
-            direction = "bearish" if direction == "bullish" else "bullish"
-            new_sl = tp  # ancien TP devient nouveau SL
-            new_tp = sl  # ancien SL devient nouveau TP
-            sl, tp = new_sl, new_tp
-            rr = abs(entry - tp) / abs(entry - sl) if abs(entry - sl) > 0 else 0.5
 
         # Risk 0.5% + cap dur a 2.0 lots (demo Vantage = stops invalides au-dela)
         risk_pct = float(os.getenv("RISK_PCT", "0.005"))
@@ -304,19 +269,18 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         lots = min(lots, info.volume_max, lot_cap)
 
         # Place ordre
-        magic = INVERSE_MAGIC if is_inverse else BOT_MAGIC
-        comment = f"V19{'-INV' if is_inverse else ''}-{direction[0].upper()} ml={proba:.2f}"
+        comment = f"V19-{direction[0].upper()} ml={proba:.2f}"
 
         result = mt5_exec.place_market_order(
             symbol=asset, direction=direction, volume=lots,
-            sl=sl, tp=tp, comment=comment, magic=magic,
+            sl=sl, tp=tp, comment=comment, magic=BOT_MAGIC,
         )
         if result is None:
             log.warning(f"{asset} : ordre rejete par MT5")
             return False
 
         log.info(
-            f"TRADE OK {asset} {direction} {'(INVERSE)' if is_inverse else ''} "
+            f"TRADE OK {asset} {direction} "
             f"entry={result['price']:.5f} SL={sl:.5f} TP={tp:.5f} "
             f"vol={result['volume']:.2f} rr={rr:.2f} ml={proba:.3f}"
         )
@@ -341,7 +305,7 @@ def main():
     log.info("BOT V19 LIVE - DEEP LEARNING ICT")
     log.info("=" * 60)
     log.info(f"THRESHOLD = {THRESHOLD}")
-    log.info(f"INVERSE_MODE = {INVERSE_MODE} (thr={INVERSE_THR}, max_open={INVERSE_MAX_OPEN})")
+    log.info(f"Mode normal : trade quand proba >= {THRESHOLD}")
     log.info(f"RECENT_CUTOFF_MIN = {RECENT_CUTOFF_MIN}")
     log.info(f"ASSETS = {ASSETS}")
 
@@ -369,7 +333,7 @@ def main():
         session_id=session_id,
     )
     log.info(f"DashboardPusher : url={pusher.url}, session={session_id}")
-    pusher.push_start(f"Bot V19 demarre (inverse={INVERSE_MODE})")
+    pusher.push_start(f"Bot V19 demarre (threshold={THRESHOLD})")
 
     log.info("=" * 60)
     log.info("DEMARRAGE BOUCLE PRINCIPALE - 1 cycle/min")
@@ -382,9 +346,8 @@ def main():
             t0 = time.time()
             now = datetime.now(timezone.utc)
 
-            # Compte positions inverses ouvertes
+            # Compte positions ouvertes
             positions = mt5.positions_get() or []
-            n_inverse_open = sum(1 for p in positions if getattr(p, "magic", 0) == INVERSE_MAGIC)
             n_total_open = len(positions)
 
             # Refresh balance
@@ -392,7 +355,7 @@ def main():
             balance = account.balance if account else 0
             equity = account.equity if account else 0
 
-            log.info(f"--- CYCLE {cycle_n} | T={now.strftime('%H:%M:%S')} UTC | balance={balance:.2f} | open={n_total_open} (inv={n_inverse_open}) ---")
+            log.info(f"--- CYCLE {cycle_n} | T={now.strftime('%H:%M:%S')} UTC | balance={balance:.2f} | open={n_total_open} ---")
 
             # Process tous les actifs sequentiellement
             all_rejets = []
@@ -401,8 +364,7 @@ def main():
             total_trades = 0
 
             for asset in ASSETS:
-                res = process_asset(asset, predictor, pusher, mt5_exec,
-                                     balance, n_inverse_open)
+                res = process_asset(asset, predictor, pusher, mt5_exec, balance)
                 total_obs += res["n_obs"]
                 total_trades += res["trades_taken"]
                 all_rejets.extend(res["rejets"])
