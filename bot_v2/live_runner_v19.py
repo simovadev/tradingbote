@@ -72,6 +72,7 @@ from bot_v2.push_dashboard import DashboardPusher
 ASSETS = [
     "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD",
     "AUDUSD", "USDJPY", "SP500", "DJ30", "FRA40", "USDCAD", "USDCHF",
+    "NZDUSD", "XAGUSD",  # actifs V19 supplementaires dispo sur Vantage demo
 ]
 
 THRESHOLD = float(os.environ["BOT_THRESHOLD"])
