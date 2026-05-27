@@ -134,8 +134,9 @@ def process_asset(asset: str, predictor: V19Predictor | None,
         # Filtre OBs recents (validation_ts >= last_bar - RECENT_CUTOFF_MIN)
         # ET >= _boot_ts (anti-rafale au demarrage : on ne trade pas les OBs deja vieux)
         last_bar = df_m1.index[-1]
-        cutoff = last_bar - pd.Timedelta(minutes=RECENT_CUTOFF_MIN)
-        if _boot_ts is not None and _boot_ts > cutoff:
+        cutoff_age = last_bar - pd.Timedelta(minutes=RECENT_CUTOFF_MIN)
+        cutoff = cutoff_age
+        if _boot_ts is not None and _boot_ts > cutoff_age:
             cutoff = _boot_ts
         obs_recent = [
             ob for ob in obs
@@ -143,6 +144,12 @@ def process_asset(asset: str, predictor: V19Predictor | None,
             and ob.validation_ts >= cutoff
             and ob.validation_ts <= last_bar
         ]
+        # Debug : 1ere fois qu'on voit un OB filtre, on log la comparaison
+        n_total = len([ob for ob in obs if ob.validation_ts is not None])
+        if n_total > len(obs_recent) and asset == ASSETS[0]:
+            sample = next((ob for ob in obs if ob.validation_ts is not None), None)
+            if sample:
+                log.info(f"  [filter] {asset} : {len(obs_recent)}/{n_total} OBs. cutoff={cutoff} (boot={_boot_ts}, age={cutoff_age}). sample_ts={sample.validation_ts} type={type(sample.validation_ts).__name__}")
         res["n_obs"] = len(obs_recent)
 
         if not obs_recent:
