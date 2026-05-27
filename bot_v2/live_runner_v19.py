@@ -69,16 +69,39 @@ from bot_v2.push_dashboard import DashboardPusher
 
 
 # ============ Configuration ============
-ASSETS = [
-    # 13 actifs principaux
-    "XAUUSD", "NAS100", "GER40", "BTCUSD", "EURUSD", "GBPUSD",
-    "AUDUSD", "USDJPY", "SP500", "DJ30", "FRA40", "USDCAD", "USDCHF",
-    # 14 actifs V19 supplementaires (Vantage demo, necessite symbol_select au boot)
-    "NZDUSD", "XAGUSD", "ETHUSD", "USDMXN", "USDZAR",
-    "CL-OIL", "GAS-C", "HK50", "UK100", "BVSPX",
-    "Coffee-C", "Cocoa-C", "Wheat-C", "Sugar-C",
-    # Nikkei225 absent du broker Vantage (pas de JP225/JPN225/NIK225)
-]
+# Mapping nom V19 (asset_id du model) -> nom broker MT5 (peut avoir suffixe + pour RAW ECN)
+# Genere via _vps_test_all_28_plus.py sur le compte demo Vantage RAW
+BROKER_MAP = {
+    "XAUUSD":    "XAUUSD+",
+    "EURUSD":    "EURUSD+",
+    "GBPUSD":    "GBPUSD+",
+    "USDJPY":    "USDJPY+",
+    "USDCHF":    "USDCHF+",
+    "USDCAD":    "USDCAD+",
+    "AUDUSD":    "AUDUSD+",
+    "NZDUSD":    "NZDUSD+",
+    "USDMXN":    "USDMXN+",
+    "ETHUSD":    "ETHUSD",
+    "CL-OIL":    "CL-OIL",
+    "NAS100":    "NAS100",
+    "XAGUSD":    "XAGUSD",
+    "DJ30":      "DJ30",
+    "GAS-C":     "GAS-C",
+    "HK50":      "HK50",
+    "GER40":     "GER40",
+    "FRA40":     "FRA40",
+    "UK100":     "UK100",
+    "Nikkei225": "Nikkei225",
+    "BVSPX":     "BVSPX",
+    "SP500":     "SP500",
+    "Coffee-C":  "Coffee-C",
+    "Cocoa-C":   "Cocoa-C",
+    "Sugar-C":   "Sugar-C",
+    # KO sur compte RAW : BTCUSD (INVALID_STOPS), USDZAR (INVALID_STOPS), Wheat-C (MARKET_CLOSED)
+}
+
+# ASSETS = noms V19 (utilises pour V19Predictor + features). Lookup MT5 via BROKER_MAP.
+ASSETS = list(BROKER_MAP.keys())
 
 THRESHOLD = float(os.environ["BOT_THRESHOLD"])
 RECENT_CUTOFF_MIN = int(os.environ["RECENT_CUTOFF_MIN"])
@@ -94,9 +117,14 @@ _boot_ts: pd.Timestamp | None = None  # UTC : OBs anterieurs ignores
 
 
 # ============ Fetch data ============
+def broker_sym(asset: str) -> str:
+    """Traduit un nom V19 en nom broker MT5 (avec suffixe + si necessaire)."""
+    return BROKER_MAP.get(asset, asset)
+
+
 def fetch_ohlcv(asset: str, tf, n: int = 500) -> pd.DataFrame | None:
-    """Recupere les N dernieres bougies d'un actif."""
-    rates = mt5.copy_rates_from_pos(asset, tf, 0, n)
+    """Recupere les N dernieres bougies d'un actif (utilise nom broker)."""
+    rates = mt5.copy_rates_from_pos(broker_sym(asset), tf, 0, n)
     if rates is None or len(rates) == 0:
         return None
     df = pd.DataFrame(rates)
@@ -249,18 +277,19 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         # Sizing proportionnel au compte : lots = (risk_pct * balance) / risk_per_lot
         risk_pct = float(os.getenv("RISK_PCT", "0.005"))
         risk_eur = balance * risk_pct
-        info = mt5.symbol_info(asset)
+        bsym = broker_sym(asset)
+        info = mt5.symbol_info(bsym)
         if info is None:
-            log.error(f"{asset} : symbol_info None")
+            log.error(f"{asset} ({bsym}) : symbol_info None")
             return False
 
         # Distance SL en points
         tick_value = getattr(info, "trade_tick_value", 1.0)
         tick_size = getattr(info, "trade_tick_size", 0.01)
         # Prix marche actuel
-        tick = mt5.symbol_info_tick(asset)
+        tick = mt5.symbol_info_tick(bsym)
         if tick is None:
-            log.error(f"{asset} : tick None")
+            log.error(f"{asset} ({bsym}) : tick None")
             return False
         market_price = tick.ask if direction == "bullish" else tick.bid
         sl_distance = abs(market_price - sl)
@@ -287,7 +316,7 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         comment = f"V19-{direction[0].upper()} ml={proba:.2f}"
 
         result = mt5_exec.place_market_order(
-            symbol=asset, direction=direction, volume=lots,
+            symbol=bsym, direction=direction, volume=lots,
             sl=sl, tp=tp, comment=comment, magic=BOT_MAGIC,
         )
         if result is None:
@@ -341,13 +370,14 @@ def main():
     log.info(f"  Balance : {mt5_exec.account_info.balance} {mt5_exec.account_info.currency}")
     log.info(f"  Trade mode : {mt5_exec.account_info.trade_mode} (0=demo, 2=real)")
 
-    # Force symbol_select sur tous les actifs (sinon symbol_info_tick = bid=0)
+    # Force symbol_select sur tous les actifs (nom broker, sinon symbol_info_tick = bid=0)
     activated, skipped = [], []
     for a in ASSETS:
-        if mt5.symbol_select(a, True):
-            activated.append(a)
+        bsym = broker_sym(a)
+        if mt5.symbol_select(bsym, True):
+            activated.append(bsym)
         else:
-            skipped.append(a)
+            skipped.append((a, bsym))
     log.info(f"  Symbols actives : {len(activated)}/{len(ASSETS)}")
     if skipped:
         log.warning(f"  Symbols KO (introuvables broker) : {skipped}")
@@ -365,7 +395,7 @@ def main():
     # IMPORTANT : aligne sur l'heure broker (last M1 candle) car MT5 timestamps
     # sont en heure broker, pas UTC reelle (Vantage = UTC+2)
     global _boot_ts
-    boot_probe = mt5.copy_rates_from_pos("EURUSD", mt5.TIMEFRAME_M1, 0, 1)
+    boot_probe = mt5.copy_rates_from_pos(broker_sym("EURUSD"), mt5.TIMEFRAME_M1, 0, 1)
     if boot_probe is not None and len(boot_probe) > 0:
         _boot_ts = pd.to_datetime(boot_probe[0]["time"], unit="s", utc=True)
         log.info(f"BOOT_TS = {_boot_ts} (heure broker - OBs anterieurs ignores)")
