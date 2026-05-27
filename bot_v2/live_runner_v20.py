@@ -72,6 +72,7 @@ from bot_v2.push_dashboard import DashboardPusher
 # Mapping nom actif (asset_id du model) -> nom broker MT5 (peut avoir suffixe + pour RAW ECN)
 # Genere via _vps_test_all_28_plus.py sur le compte demo Vantage RAW
 BROKER_MAP = {
+    # 26 actifs originaux V19 (tous testes OK)
     "XAUUSD":    "XAUUSD+",
     "EURUSD":    "EURUSD+",
     "GBPUSD":    "GBPUSD+",
@@ -98,13 +99,85 @@ BROKER_MAP = {
     "Coffee-C":  "Coffee-C",
     "Cocoa-C":   "Cocoa-C",
     "Sugar-C":   "Sugar-C",
-    # KO sur compte RAW : USDZAR (INVALID_STOPS), Wheat-C (MARKET_CLOSED)
+    # === V20+ : 52 actifs supplementaires (forex en +, autres sans suffixe sur compte RAW) ===
+    # Forex crosses (suffixe +)
+    "EURJPY":   "EURJPY+",
+    "EURGBP":   "EURGBP+",
+    "EURCHF":   "EURCHF+",
+    "EURAUD":   "EURAUD+",
+    "EURCAD":   "EURCAD+",
+    "EURNZD":   "EURNZD+",
+    "GBPJPY":   "GBPJPY+",
+    "GBPCHF":   "GBPCHF+",
+    "GBPAUD":   "GBPAUD+",
+    "GBPCAD":   "GBPCAD+",
+    "GBPNZD":   "GBPNZD+",
+    "AUDJPY":   "AUDJPY+",
+    "AUDCHF":   "AUDCHF+",
+    "AUDCAD":   "AUDCAD+",
+    "AUDNZD":   "AUDNZD+",
+    "NZDJPY":   "NZDJPY+",
+    "NZDCHF":   "NZDCHF+",
+    "NZDCAD":   "NZDCAD+",
+    "CADJPY":   "CADJPY+",
+    "CADCHF":   "CADCHF+",
+    "CHFJPY":   "CHFJPY+",
+    # Forex exotiques (suffixe +)
+    "USDZAR":   "USDZAR+",
+    "USDTRY":   "USDTRY+",
+    "USDSGD":   "USDSGD+",
+    "USDHKD":   "USDHKD+",
+    "USDNOK":   "USDNOK+",
+    "USDSEK":   "USDSEK+",
+    "USDDKK":   "USDDKK+",
+    "USDPLN":   "USDPLN+",
+    "USDCNH":   "USDCNH+",
+    "EURPLN":   "EURPLN+",
+    "EURNOK":   "EURNOK+",
+    "EURSEK":   "EURSEK+",
+    "EURHUF":   "EURHUF+",
+    "EURCZK":   "EURCZK+",
+    # Metaux (sans suffixe pour la plupart)
+    "XAUEUR":   "XAUEUR",
+    "XAUAUD":   "XAUAUD",
+    "XAUJPY":   "XAUJPY",
+    "XPDUSD":   "XPDUSD",
+    "XPTUSD":   "XPTUSD",
+    # Indices
+    "CHINA50":  "CHINA50",
+    # Crypto
+    "LTCUSD":   "LTCUSD",
+    "XRPUSD":   "XRPUSD",
+    "ADAUSD":   "ADAUSD",
+    "BCHUSD":   "BCHUSD",
+    "DOTUSD":   "DOTUSD",
+    "LNKUSD":   "LNKUSD",
+    "SOLUSD":   "SOLUSD",
+    # Energy/softs
+    "UKOUSD":   "UKOUSD",
+    "Wheat-C":  "Wheat-C",
+    "Cotton-C": "Cotton-C",
+    "Soybean-C": "Soybean-C",
 }
 
 # Actifs qui necessitent un SL min plus large que trade_stops_level (broker ment)
 # Format : asset -> SL min en % du prix
 MIN_SL_PCT = {
-    "BTCUSD": 0.001,  # 0.1% du prix BTC (broker dit 0 mais rejette < 0.1%)
+    "BTCUSD":  0.001,   # 0.1% du prix BTC
+    "ETHUSD":  0.001,
+    "LTCUSD":  0.001,
+    "XRPUSD":  0.001,
+    "ADAUSD":  0.001,
+    "BCHUSD":  0.001,
+    "DOTUSD":  0.001,
+    "LNKUSD":  0.001,
+    "SOLUSD":  0.001,
+    "XPDUSD":  0.0005,
+    "XPTUSD":  0.0005,
+    "USDZAR":  0.0005,  # forex exotique
+    "USDTRY":  0.0005,
+    "USDMXN":  0.0005,
+    "EURHUF":  0.0005,
 }
 
 # ASSETS = noms actifs (utilises pour V20Predictor + features). Lookup MT5 via BROKER_MAP.
