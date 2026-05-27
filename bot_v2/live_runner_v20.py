@@ -381,7 +381,7 @@ def main():
     if predictor is None:
         log.error("V20 model INDISPONIBLE - bot ne demarre pas")
         return
-    log.info(f"V20 OK : device={predictor.device}, n_assets={predictor.n_assets}, n_ict={predictor.n_ict}")
+    log.info(f"V20 OK : device={predictor.device}, n_ict={predictor.n_ict} (sans asset_emb)")
 
     # 2. Init MT5
     mt5_exec = MT5Executor()
