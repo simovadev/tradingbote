@@ -1,0 +1,21 @@
+{
+  "adversarial_auc": 0.6400855823879799,
+  "verdict": "LEGER DRIFT (peu d'impact, acceptable)",
+  "n_train_sample": 50000,
+  "n_oos_sample": 50000,
+  "n_features": 52,
+  "top5_feature_indices": [
+    35,
+    49,
+    31,
+    32,
+    33
+  ],
+  "top5_feature_importances": [
+    0.45813080246450916,
+    0.1407201431677639,
+    0.06710788784897292,
+    0.06163235217095903,
+    0.051236384579944
+  ]
+}
