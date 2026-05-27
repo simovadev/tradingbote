@@ -362,10 +362,16 @@ def main():
     pusher.push_start(f"Bot V19 demarre (threshold={THRESHOLD})")
 
     # Anti-rafale au boot : on n'evalue que les OBs valides APRES le demarrage
-    # _boot_ts est tz-aware UTC, comparable a ob.validation_ts (qui est aussi tz-aware UTC)
+    # IMPORTANT : aligne sur l'heure broker (last M1 candle) car MT5 timestamps
+    # sont en heure broker, pas UTC reelle (Vantage = UTC+2)
     global _boot_ts
-    _boot_ts = pd.Timestamp.now(tz="UTC")
-    log.info(f"BOOT_TS = {_boot_ts} (OBs anterieurs ignores au demarrage)")
+    boot_probe = mt5.copy_rates_from_pos("EURUSD", mt5.TIMEFRAME_M1, 0, 1)
+    if boot_probe is not None and len(boot_probe) > 0:
+        _boot_ts = pd.to_datetime(boot_probe[0]["time"], unit="s", utc=True)
+        log.info(f"BOOT_TS = {_boot_ts} (heure broker - OBs anterieurs ignores)")
+    else:
+        log.warning("BOOT_TS : impossible de lire last candle, fallback UTC")
+        _boot_ts = pd.Timestamp.now(tz="UTC")
 
     log.info("=" * 60)
     log.info("DEMARRAGE BOUCLE PRINCIPALE - 1 cycle/min")
