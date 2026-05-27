@@ -1033,13 +1033,17 @@ def scan_asset(mt5_exec: MT5Executor, instrument: str, state: LiveState, balance
     # Le ML decide via feature has_mss_nearby (aligne avec V5 training).
     obs_confirmed = obs
 
-    # V15 FIX (2026-05-25, user) : PAS DE TIMER. Scan UNIQUEMENT les OB dont
-    # la validation == derniere bougie fermee. Logique pure ICT/SMC.
+    # V19.1 FIX (2026-05-27) : strict equality "validation == last_bar" filtrait
+    # TOUS les OBs en pratique (la validation arrive rarement a la seconde du scan).
+    # On revient a un cutoff souple : OBs valides dans les RECENT_CUTOFF_MIN dernieres min.
+    # Anti-spam : on filtre les setups deja vus (state._seen_setups dans le master).
+    RECENT_CUTOFF_MIN = int(os.environ.get("RECENT_CUTOFF_MIN", "15"))
     now = df_m1.index[-1]
+    cutoff = now - pd.Timedelta(minutes=RECENT_CUTOFF_MIN)
     obs_recent = [
         ob for ob in obs_confirmed
         if ob.validation_index is not None
-        and df_m1.index[ob.validation_index] == now
+        and df_m1.index[ob.validation_index] >= cutoff
     ]
 
     if debug_diag:
