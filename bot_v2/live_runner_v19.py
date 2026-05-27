@@ -10,8 +10,7 @@ Configuration via env :
 - DASHBOARD_URL : URL Railway (push events)
 - BOT_THRESHOLD : seuil ML pour trader (default 0.30)
 - RECENT_CUTOFF_MIN : age max d'un OB pour etre evalue (default 60)
-- RISK_PCT : risque par trade (default 0.005 = 0.5%)
-- LOT_CAP : cap dur sur taille de lot (default 2.0)
+- RISK_PCT : risque par trade (default 0.005 = 0.5% du compte)
 
 Usage : python -m bot_v2.live_runner_v19
 """
@@ -230,9 +229,8 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         entry = float(setup.entry_price)
         rr = float(setup.rr)
 
-        # Risk 0.5% + cap dur a 2.0 lots (demo Vantage = stops invalides au-dela)
+        # Sizing proportionnel au compte : lots = (risk_pct * balance) / risk_per_lot
         risk_pct = float(os.getenv("RISK_PCT", "0.005"))
-        lot_cap = float(os.getenv("LOT_CAP", "2.0"))
         risk_eur = balance * risk_pct
         info = mt5.symbol_info(asset)
         if info is None:
@@ -266,7 +264,7 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
 
         lots = risk_eur / risk_per_lot
         lots = max(info.volume_min, round(lots / info.volume_step) * info.volume_step)
-        lots = min(lots, info.volume_max, lot_cap)
+        lots = min(lots, info.volume_max)
 
         # Place ordre
         comment = f"V19-{direction[0].upper()} ml={proba:.2f}"
