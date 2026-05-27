@@ -57,12 +57,13 @@ os.environ.setdefault(
     "https://tradingbote-production.up.railway.app/api/ingest",
 )
 
-# INVERSE_TRADE_MODE (2026-05-27, user idea):
-# Force activation via setdefault. Si l'env est deja set, on respecte.
-# Sinon par defaut on active (1) avec seuil 0.20 et cap 10 positions.
-os.environ.setdefault("INVERSE_TRADE_MODE", "1")
+# INVERSE_TRADE_MODE (2026-05-27, user idea): DESACTIVE par defaut (debugging)
+# Activate manuellement via env : INVERSE_TRADE_MODE=1
+os.environ.setdefault("INVERSE_TRADE_MODE", "0")
 os.environ.setdefault("INVERSE_THR", "0.20")
 os.environ.setdefault("INVERSE_MAX_OPEN", "10")
+# RECENT_CUTOFF_MIN par defaut 15 min, configurable
+os.environ.setdefault("RECENT_CUTOFF_MIN", "15")
 
 import pandas as pd
 
