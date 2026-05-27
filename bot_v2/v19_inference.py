@@ -23,6 +23,20 @@ import pandas as pd
 ROOT = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, ROOT)
 
+# Lazy torch import (eviter crash si torch indisponible)
+_torch = None
+_V19ICTNet = None
+
+
+def _ensure_torch():
+    global _torch, _V19ICTNet
+    if _torch is None:
+        import torch as _t
+        from bot_v2.v19_model import V19ICTNet as _M
+        _torch = _t
+        _V19ICTNet = _M
+    return _torch, _V19ICTNet
+
 
 # Hyperparams identiques V19
 M1_LEN = 240
@@ -97,13 +111,12 @@ class V19Predictor:
     _instance: "V19Predictor | None" = None
 
     def __init__(self, model_path: Path):
-        import torch
-        from bot_v2.v19_model import V19ICTNet
+        torch, V19ICTNet = _ensure_torch()
 
         self.torch = torch
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
+        ckpt = torch.load(str(model_path), map_location=self.device, weights_only=False)
         n_assets = int(ckpt.get("n_assets", 28))
         n_ict = int(ckpt.get("n_ict", len(ICT_FEATURES)))
         self.ict_means = np.asarray(ckpt["ict_means"], dtype=np.float32)
