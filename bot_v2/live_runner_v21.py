@@ -114,7 +114,7 @@ MIN_SL_PCT = {
     "XRPUSD":  0.002,  "ADAUSD":  0.005,  "BCHUSD":  0.002,
     "DOTUSD":  0.008,  "LNKUSD":  0.015,  "SOLUSD":  0.015,
     # Metaux
-    "XPDUSD":  0.005,  "XPTUSD":  0.005,
+    "XPDUSD":  0.012,  "XPTUSD":  0.006,
     "XAUJPY":  0.001,
     # Forex exotiques (besoin plus large)
     "USDZAR":  0.002,  "USDTRY":  0.005,  "USDMXN":  0.002,
