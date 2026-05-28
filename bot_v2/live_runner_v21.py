@@ -110,24 +110,27 @@ BROKER_MAP = {
 }
 
 MIN_SL_PCT = {
-    # Crypto (broker exige > 0.1% min)
-    "BTCUSD":  0.0015, "ETHUSD":  0.0015, "LTCUSD":  0.002,
-    "XRPUSD":  0.002,  "ADAUSD":  0.005,  "BCHUSD":  0.002,
-    "DOTUSD":  0.008,  "LNKUSD":  0.015,  "SOLUSD":  0.015,
+    # Crypto (broker exige beaucoup)
+    "BTCUSD":  0.0015, "ETHUSD":  0.0015, "LTCUSD":  0.025,
+    "XRPUSD":  0.015,  "ADAUSD":  0.04,   "BCHUSD":  0.015,
+    "DOTUSD":  0.05,   "LNKUSD":  0.02,   "SOLUSD":  0.02,
     # Metaux
-    "XPDUSD":  0.012,  "XPTUSD":  0.006,
-    "XAUJPY":  0.001,
+    "XPDUSD":  0.015,  "XPTUSD":  0.015,
+    "XAUJPY":  0.001,  "XAGUSD":  0.002,
+    # Energy
+    "CL-OIL":  0.003,  "UKOUSD":  0.002,  "GAS-C":   0.002,
     # Forex exotiques (besoin plus large)
     "USDZAR":  0.002,  "USDTRY":  0.005,  "USDMXN":  0.002,
-    "USDNOK":  0.002,  "USDSEK":  0.002,  "USDDKK":  0.001,
+    "USDNOK":  0.006,  "USDSEK":  0.002,  "USDDKK":  0.001,
     "USDPLN":  0.002,
     "EURHUF":  0.002,  "EURPLN":  0.002,
-    "EURNOK":  0.002,  "EURSEK":  0.002,  "EURCZK":  0.002,
-    # Indices europe/asia (souvent stops_level eleve)
+    "EURNOK":  0.006,  "EURSEK":  0.002,  "EURCZK":  0.002,
+    # Indices europe/asia
     "GER40":   0.001,  "FRA40":   0.001,  "UK100":   0.001,
     "Nikkei225": 0.001,
     # Softs
-    "Cotton-C": 0.005,
+    "Cotton-C": 0.005, "Wheat-C": 0.003,  "Soybean-C": 0.003,
+    "Coffee-C": 0.003, "Cocoa-C": 0.003,  "Sugar-C":  0.003,
 }
 
 ASSETS = list(BROKER_MAP.keys())
