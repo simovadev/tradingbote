@@ -12,7 +12,7 @@ $wrapper = @'
 cd /d C:\Users\Administrator\tradingbote
 set DASHBOARD_URL=https://tradingbote-production.up.railway.app/api/ingest
 set RECENT_CUTOFF_MIN=60
-set BOT_THRESHOLD=0.80
+set BOT_THRESHOLD=0.65
 set RISK_PCT=0.05
 python -u -m bot_v2.live_runner_v21 1>>C:\Users\Administrator\tradingbote\live_v21_stdout.log 2>>C:\Users\Administrator\tradingbote\live_v21_stderr.log
 '@

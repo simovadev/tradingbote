@@ -691,7 +691,7 @@ def main():
     BROKER_OFFSET_SEC = detect_broker_offset()
     log.info(f"BROKER_OFFSET_SEC = {BROKER_OFFSET_SEC} ({BROKER_OFFSET_SEC/3600:+.1f}h)")
 
-    global _boot_ts
+    global _boot_ts, _seen_obs
     _boot_ts = pd.Timestamp.now(tz="UTC")
     log.info(f"BOOT_TS = {_boot_ts} (UTC vrai)")
 
@@ -829,12 +829,10 @@ def main():
             # PAS de cleanup _seen_obs : un OB evalue une seule fois, point.
             # Si on cleanup, V21 peut dire NON puis OUI sur le meme OB plus tard
             # (apres que le price ait deja bouge) -> trade en retard, RR cassé.
-            # Cap memoire : garde les 10000 dernieres entrees (au-dela, on supprime
+            # Cap memoire : garde les 5000 dernieres entrees (au-dela, on supprime
             # les plus vieilles via FIFO).
             if cycle_n % 240 == 0 and len(_seen_obs) > 10000:
                 log.info(f"  _seen_obs cap : {len(_seen_obs)} entries, garde les 5000 plus recentes")
-                # set non ordonne -> simple : on garde 5000 random (perte de qq vieilles entrees OK)
-                global _seen_obs
                 _seen_obs = set(list(_seen_obs)[-5000:])
 
             # Flush spreads + audit toutes les 10 cycles (~2.5 min en cycle 15s)
