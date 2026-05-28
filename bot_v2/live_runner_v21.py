@@ -240,7 +240,8 @@ def process_asset(asset: str, predictor: V21Predictor,
                 )
                 if r is None or r.verdict != "TRADE" or r.trade_setup is None:
                     reason = r.rejection_reason if r else "no_result"
-                    _seen_obs.add(ob_key)
+                    # PAS de _seen_obs.add : l'OB peut devenir valide plus tard (sweep, FVG, BOS)
+                    # On ne marque vu QUE quand V21 a vraiment evalue (proba calculee)
                     res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
                                            "direction": ob.direction, "reason": reason or "no_trade"})
                     continue
@@ -537,11 +538,11 @@ def main():
                                             candles_by_asset=candles_by_asset if candles_by_asset else None)
                 log.info(f"  Pushed {len(rejets_fmt)} rejets ({len(candles_by_asset)} charts) au dashboard")
 
-            # Cleanup _seen_obs tous les 30 cycles (retention 2h)
-            if cycle_n % 30 == 0:
+            # Cleanup _seen_obs tous les 120 cycles (~30 min en cycle 15s)
+            if cycle_n % 120 == 0:
                 global _seen_obs
                 _seen_obs.clear()
-                log.info("  _seen_obs cleanup (cycle 30)")
+                log.info(f"  _seen_obs cleanup (cycle {cycle_n})")
 
             # Flush spreads logger toutes les 10 min
             if cycle_n % 10 == 0:
@@ -551,8 +552,10 @@ def main():
                     log.warning(f"spread_logger flush fail : {e}")
 
             # Sleep jusqu'a la prochaine minute boundary
-            next_minute = now.replace(second=0, microsecond=0) + pd.Timedelta(minutes=1)
-            sleep_s = max(0.1, (next_minute - datetime.now(timezone.utc)).total_seconds())
+            # Cycle plus rapide : 15s au lieu de 60s (reduit le retard sur OB validation)
+            CYCLE_SEC = int(os.getenv("CYCLE_SEC", "15"))
+            elapsed_cycle = time.time() - t0
+            sleep_s = max(0.1, CYCLE_SEC - elapsed_cycle)
             time.sleep(sleep_s)
     except KeyboardInterrupt:
         log.info("Interruption clavier")
