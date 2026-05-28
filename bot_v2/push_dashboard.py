@@ -176,6 +176,45 @@ class DashboardPusher:
             data["candles"] = candles
         self.push_event("SETUP", data, instrument=instrument)
 
+    def push_setup_cancelled(
+        self,
+        instrument: str,
+        ts: Any,
+        direction: str,
+        entry_price: float,
+        sl: float,
+        tp: float,
+        rr: float,
+        score: int,
+        ml_proba: float,
+        cancel_reason: str,
+        cancel_detail: str | None = None,
+        spread_pct: float | None = None,
+        max_spread_pct: float | None = None,
+        killzone: str | None = None,
+        candles: list[dict] | None = None,
+    ) -> None:
+        """Setup ICT valide + ML OK mais trade ANNULE (spread trop large, SL trop serre, etc.)."""
+        ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        data = {
+            "ts": ts_str,
+            "direction": direction,
+            "entry_price": float(entry_price),
+            "sl": float(sl),
+            "tp": float(tp),
+            "rr": float(rr),
+            "score": int(score),
+            "ml_proba": float(ml_proba),
+            "cancel_reason": cancel_reason,
+            "cancel_detail": cancel_detail,
+            "spread_pct": spread_pct,
+            "max_spread_pct": max_spread_pct,
+            "killzone": killzone,
+        }
+        if candles:
+            data["candles"] = candles
+        self.push_event("SETUP_CANCELLED", data, instrument=instrument)
+
     def push_rejected_batch(self, items: list[dict[str, Any]],
                             candles_by_asset: dict[str, list[dict]] | None = None) -> None:
         """Batch des rejets ML d'un cycle (1 push contient tous les rejets).

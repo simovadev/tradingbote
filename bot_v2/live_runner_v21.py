@@ -135,11 +135,41 @@ MIN_SL_PCT = {
     "Coffee-C": 0.003, "Cocoa-C": 0.003,  "Sugar-C":  0.003,
 }
 
+# Spread max accepte par actif (% du prix). Au-dela, setup ANNULE
+# (le spread bouffe le RR -> trade impossible meme si setup ICT valide).
+# Default 0.05% (5bp) pour majeurs. Plus large pour exotiques connus.
+MAX_SPREAD_PCT_DEFAULT = float(os.getenv("MAX_SPREAD_PCT_DEFAULT", "0.05"))
+MAX_SPREAD_PCT = {
+    # Forex exotiques (spreads broker tres larges)
+    "USDZAR":  0.15, "USDTRY":  0.30, "USDMXN":  0.10,
+    "USDNOK":  0.10, "USDSEK":  0.10, "USDDKK":  0.05,
+    "USDPLN":  0.10, "USDCNH":  0.05, "USDSGD":  0.03,
+    "EURHUF":  0.15, "EURPLN":  0.10, "EURNOK":  0.10,
+    "EURSEK":  0.10, "EURCZK":  0.15,
+    # Metaux exotiques
+    "XPDUSD":  0.40, "XPTUSD":  0.20, "XAGUSD":  0.10,
+    "XAUEUR":  0.05, "XAUAUD":  0.05, "XAUJPY":  0.05,
+    # Crypto alts
+    "LTCUSD":  0.25, "XRPUSD":  0.30, "ADAUSD":  0.50,
+    "BCHUSD":  0.30, "DOTUSD":  0.50, "LNKUSD":  0.30, "SOLUSD":  0.20,
+    # Indices europe/asia
+    "CHINA50": 0.10, "Nikkei225": 0.05,
+    # Energy
+    "UKOUSD":  0.05, "GAS-C": 0.10,
+    # Softs
+    "Cotton-C": 0.10, "Wheat-C": 0.10, "Soybean-C": 0.10,
+    "Coffee-C": 0.15, "Cocoa-C": 0.15, "Sugar-C": 0.15,
+}
+
 ASSETS = list(BROKER_MAP.keys())
 THRESHOLD = float(os.environ["BOT_THRESHOLD"])
 RECENT_CUTOFF_MIN = int(os.environ["RECENT_CUTOFF_MIN"])
 BOT_MAGIC = 21000  # V21
 MAX_CONCURRENT_TRADES = 5
+
+# Limite anti-rafales : N max trades par cycle, cooldown par devise/famille
+MAX_TRADES_PER_CYCLE = int(os.getenv("MAX_TRADES_PER_CYCLE", "3"))
+FAMILY_COOLDOWN_MIN = int(os.getenv("FAMILY_COOLDOWN_MIN", "10"))  # min entre 2 trades d'une meme devise
 
 _seen_obs: set[tuple] = set()
 _boot_ts: pd.Timestamp | None = None
@@ -148,9 +178,74 @@ _spread_logger = SpreadLogger()  # log spreads pour stats futures
 _cycle_spreads: dict[str, dict] = {}  # spread_pct + spread_points du tick courant par actif
 _audit = TradeAuditLogger()  # log forensic V21 (chaque OB detecte + decision)
 
+# Offset broker : Vantage RAW ECN = UTC+3 (GMT+3 MSK). Detecte au boot via tick BTCUSD 24/7.
+BROKER_OFFSET_SEC: int = 0  # set par detect_broker_offset() au boot
+
+# Cooldown par famille de devise : dernier trade par symbole de base
+_family_last_trade: dict[str, pd.Timestamp] = {}
+
+# Compteur d'actifs en echec MT5 recurrent (>= 3 rejets dans la session -> skip)
+_mt5_reject_count: dict[str, int] = {}
+MT5_REJECT_THRESHOLD = int(os.getenv("MT5_REJECT_THRESHOLD", "3"))
+
+
+def detect_broker_offset() -> int:
+    """Detecte l'offset broker (sec) en comparant le timestamp d'un candle M1 frais a UTC.
+    Utilise BTCUSD (24/7) en priorite, fallback XAUUSD. Retourne offset entier en heures *3600.
+    """
+    for probe_asset in ("BTCUSD", "XAUUSD", "EURUSD"):
+        bsym = BROKER_MAP.get(probe_asset, probe_asset)
+        rates = mt5.copy_rates_from_pos(bsym, mt5.TIMEFRAME_M1, 0, 1)
+        if rates is None or len(rates) == 0:
+            continue
+        broker_ts = int(rates[0]["time"])  # unix seconds dans le TZ broker
+        utc_now = datetime.now(timezone.utc).timestamp()
+        # Le dernier candle M1 a forcement entre 0s et 120s
+        # offset = broker_ts - utc_now (a la minute la plus proche)
+        diff = broker_ts - utc_now
+        # arrondi a l'heure entiere
+        offset_hours = round(diff / 3600)
+        offset_sec = offset_hours * 3600
+        log.info(
+            f"BROKER OFFSET detecte via {probe_asset} : "
+            f"broker_ts={broker_ts} utc_now={utc_now:.0f} "
+            f"diff={diff:+.0f}s = UTC{'+' if offset_hours>=0 else ''}{offset_hours}h"
+        )
+        return offset_sec
+    log.warning("BROKER OFFSET : detection echouee, on assume 0 (UTC)")
+    return 0
+
 
 def broker_sym(asset: str) -> str:
     return BROKER_MAP.get(asset, asset)
+
+
+def family_of(asset: str) -> str:
+    """Regroupe les actifs par 'famille' pour le cooldown anti-correlation.
+    Ex: EURUSD/EURJPY/EURGBP -> 'EUR' (toutes correlees a EUR).
+    SP500/NAS100/DJ30 -> 'IDX_US'.
+    XAUUSD/XAUEUR/XAUJPY -> 'XAU'.
+    """
+    a = asset.upper()
+    # Metaux precieux
+    if a.startswith("XAU"): return "XAU"
+    if a.startswith("XAG"): return "XAG"
+    if a.startswith("XPD") or a.startswith("XPT"): return "PGM"
+    # Crypto
+    if a.endswith("USD") and a[:3] in ("BTC", "ETH", "LTC", "XRP", "ADA", "BCH", "DOT", "LNK", "SOL"):
+        return "CRYPTO"
+    # Indices US
+    if a in ("SP500", "NAS100", "DJ30", "US30"): return "IDX_US"
+    if a in ("GER40", "FRA40", "UK100", "EU50"): return "IDX_EU"
+    if a in ("Nikkei225", "HK50", "CHINA50"): return "IDX_ASIA"
+    # Energie
+    if a in ("CL-OIL", "UKOUSD", "GAS-C"): return "ENERGY"
+    # Softs
+    if a.endswith("-C"): return "SOFT"
+    # Forex : on prend la 1ere devise comme famille (EUR pour EURUSD/EURJPY/EURGBP)
+    if len(a) == 6 and a.isalpha():
+        return a[:3]
+    return a
 
 
 def fetch_ohlcv(asset: str, tf, n: int = 500) -> pd.DataFrame | None:
@@ -158,7 +253,9 @@ def fetch_ohlcv(asset: str, tf, n: int = 500) -> pd.DataFrame | None:
     if rates is None or len(rates) == 0:
         return None
     df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    # FIX OFFSET : MT5 retourne le timestamp en TZ broker (Vantage = UTC+3).
+    # On retranche l'offset detecte au boot pour avoir des timestamps UTC vrais.
+    df["time"] = pd.to_datetime(df["time"] - BROKER_OFFSET_SEC, unit="s", utc=True)
     df = df.rename(columns={"tick_volume": "volume"})
     return df.set_index("time").sort_index()
 
@@ -178,7 +275,8 @@ def process_asset(asset: str, predictor: V21Predictor,
                    pusher: DashboardPusher, mt5_exec: MT5Executor,
                    balance: float) -> dict:
     res = {"asset": asset, "n_obs": 0, "rejets": [], "setups": [],
-           "trades_taken": 0, "errors": [], "candles": None}
+           "trades_taken": 0, "errors": [], "candles": None,
+           "candidates": []}  # setups acceptes ML (proba>=THRESHOLD), a trier par la main loop
     # Capture spread courant pour cet actif
     bsym = broker_sym(asset)
     info = mt5.symbol_info(bsym)
@@ -328,18 +426,15 @@ def process_asset(asset: str, predictor: V21Predictor,
                 )
 
                 if proba >= THRESHOLD:
-                    pusher.push_setup(
-                        instrument=asset, ts=ob.validation_ts,
-                        direction=ob.direction,
-                        entry_price=setup.entry_price,
-                        sl=setup.stop_loss, tp=setup.take_profit,
-                        rr=setup.rr, score=r.score or 0,
-                        ml_proba=proba, killzone=kz,
-                        candles=res.get("candles"),  # graphique pour le SETUP
-                    )
-                    if execute_trade(mt5_exec, asset, setup, proba, balance, ob, kz, pusher):
-                        res["trades_taken"] += 1
-                    res["setups"].append({"asset": asset, "proba": proba, "proba_v20": proba_v20})
+                    # FIX RAFALES : on ne trade plus directement, on collecte le candidat.
+                    # La boucle main triera par proba et appliquera top-N + cooldown devise.
+                    res["candidates"].append({
+                        "asset": asset, "direction": ob.direction,
+                        "setup": setup, "ob": ob, "proba": proba,
+                        "proba_v20": proba_v20, "killzone": kz,
+                        "score": r.score or 0,
+                        "validation_ts": ob.validation_ts,
+                    })
                 else:
                     res["rejets"].append({
                         "asset": asset, "ts": ob.validation_ts.isoformat(),
@@ -359,7 +454,18 @@ def process_asset(asset: str, predictor: V21Predictor,
 
 def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
                    balance: float, ob, killzone: str,
-                   pusher: DashboardPusher) -> bool:
+                   pusher: DashboardPusher) -> dict:
+    """Tente d'envoyer un ordre MT5.
+
+    Returns dict avec status :
+      - "OK"               : trade execute
+      - "SPREAD_TOO_HIGH"  : spread broker trop large -> setup annule
+      - "SL_TOO_TIGHT"     : SL ICT < min broker -> setup annule
+      - "MARGIN"           : marge insuffisante -> setup annule
+      - "MT5_REJECT"       : ordre rejete par MT5 -> setup annule
+      - "FAIL"             : erreur interne
+    + 'detail' optionnel (str humain) + 'spread_pct' / 'min_required' selon cas.
+    """
     try:
         direction = setup.direction
         sl = float(setup.stop_loss)
@@ -372,16 +478,39 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         info = mt5.symbol_info(bsym)
         if info is None:
             log.error(f"{asset} ({bsym}) : symbol_info None")
-            return False
+            return {"status": "FAIL", "detail": "symbol_info None"}
         tick_value = getattr(info, "trade_tick_value", 1.0)
         tick_size = getattr(info, "trade_tick_size", 0.01)
         tick = mt5.symbol_info_tick(bsym)
         if tick is None:
-            return False
+            return {"status": "FAIL", "detail": "tick None"}
         market_price = tick.ask if direction == "bullish" else tick.bid
         sl_distance = abs(market_price - sl)
         if sl_distance <= 0:
-            return False
+            return {"status": "FAIL", "detail": "sl_distance <= 0"}
+
+        # CHECK SPREAD : si spread > seuil actif -> setup ANNULE (trop cher a trader)
+        spread_abs = tick.ask - tick.bid
+        mid = (tick.ask + tick.bid) / 2 if tick.bid > 0 else market_price
+        spread_pct = (spread_abs / mid * 100) if mid > 0 else 0
+        max_spread = MAX_SPREAD_PCT.get(asset, MAX_SPREAD_PCT_DEFAULT)
+        # Egalement : spread doit pas bouffer plus de 25% du SL distance
+        sl_in_pct = (sl_distance / mid * 100) if mid > 0 else 0
+        spread_vs_sl = (spread_abs / sl_distance) if sl_distance > 0 else 1
+        if spread_pct > max_spread or spread_vs_sl > 0.25:
+            log.warning(
+                f"{asset} : spread trop eleve "
+                f"(spread={spread_pct:.4f}% > max {max_spread:.4f}% "
+                f"OR spread/SL={spread_vs_sl:.1%}) -> setup ANNULE"
+            )
+            return {
+                "status": "SPREAD_TOO_HIGH",
+                "detail": f"spread={spread_pct:.4f}% (max {max_spread:.4f}%) ; spread/SL={spread_vs_sl:.1%}",
+                "spread_pct": round(spread_pct, 4),
+                "max_spread_pct": max_spread,
+                "spread_vs_sl_pct": round(spread_vs_sl * 100, 1),
+            }
+
         # SL/TP ICT STRICT : NE JAMAIS modifier le SL/TP de l'OB.
         # Si le SL est sous le minimum broker -> SKIP le trade (pas elargir).
         stops_level = getattr(info, "trade_stops_level", 0) * info.point
@@ -392,11 +521,16 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
             min_required = stops_level
         if min_required > 0 and sl_distance < min_required:
             log.info(f"{asset} : SL ICT trop serre ({sl_distance:.5f} < min broker {min_required:.5f}) -> SKIP")
-            return False
+            return {
+                "status": "SL_TOO_TIGHT",
+                "detail": f"sl_distance={sl_distance:.5f} < min_broker={min_required:.5f}",
+                "sl_distance": float(sl_distance),
+                "min_required": float(min_required),
+            }
         n_ticks = sl_distance / tick_size
         risk_per_lot = n_ticks * tick_value
         if risk_per_lot <= 0:
-            return False
+            return {"status": "FAIL", "detail": "risk_per_lot <= 0"}
         lots = risk_eur / risk_per_lot
         lots = max(info.volume_min, round(lots / info.volume_step) * info.volume_step)
         lots = min(lots, info.volume_max)
@@ -417,7 +551,12 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
             if lots_reduced * risk_per_lot < risk_eur * 0.2:
                 log.warning(f"{asset} : marge insuffisante (need {margin_needed:.0f}, max {max_margin:.0f}) "
                               f"= skip (risk effectif {lots_reduced*risk_per_lot:.2f} < 20% target)")
-                return False
+                return {
+                    "status": "MARGIN",
+                    "detail": f"margin_need={margin_needed:.0f} > max_avail={max_margin:.0f}",
+                    "margin_needed": float(margin_needed),
+                    "margin_free": float(free_margin),
+                }
             log.info(f"{asset} : lot reduit {lots} -> {lots_reduced} (marge)")
             lots = lots_reduced
         comment = f"V21-{direction[0].upper()} ml={proba:.2f}"
@@ -437,7 +576,7 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
                 proba_v21=float(proba),
                 decision="MT5_REJECT", mt5_error="place_market_order returned None",
             )
-            return False
+            return {"status": "MT5_REJECT", "detail": "place_market_order returned None"}
         slippage = result["price"] - pre_price
         log.info(
             f"TRADE OK {asset} {direction} entry={result['price']:.5f} "
@@ -462,10 +601,11 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
             sl=sl, tp=tp, volume=result["volume"],
             rr=rr, ml_proba=proba, score=0, killzone=killzone,
         )
-        return True
+        return {"status": "OK", "ticket": int(result["ticket"]),
+                "entry": float(result["price"]), "volume": float(result["volume"])}
     except Exception as e:
         log.exception(f"execute_trade fail {asset}: {e}")
-        return False
+        return {"status": "FAIL", "detail": f"{type(e).__name__}: {str(e)[:120]}"}
 
 
 def main():
@@ -513,13 +653,14 @@ def main():
     log.info(f"DashboardPusher : url={pusher.url}, session={session_id}")
     pusher.push_start(f"Bot V21 MONSTER demarre (threshold={THRESHOLD})")
 
+    # Detecter offset broker AVANT tout fetch (sinon timestamps fausses)
+    global BROKER_OFFSET_SEC
+    BROKER_OFFSET_SEC = detect_broker_offset()
+    log.info(f"BROKER_OFFSET_SEC = {BROKER_OFFSET_SEC} ({BROKER_OFFSET_SEC/3600:+.1f}h)")
+
     global _boot_ts
-    boot_probe = mt5.copy_rates_from_pos(broker_sym("EURUSD"), mt5.TIMEFRAME_M1, 0, 1)
-    if boot_probe is not None and len(boot_probe) > 0:
-        _boot_ts = pd.to_datetime(boot_probe[0]["time"], unit="s", utc=True)
-        log.info(f"BOOT_TS = {_boot_ts} (heure broker)")
-    else:
-        _boot_ts = pd.Timestamp.now(tz="UTC")
+    _boot_ts = pd.Timestamp.now(tz="UTC")
+    log.info(f"BOOT_TS = {_boot_ts} (UTC vrai)")
 
     log.info("=" * 60)
     log.info("DEMARRAGE BOUCLE PRINCIPALE - 1 cycle/min")
@@ -543,24 +684,102 @@ def main():
 
             all_rejets = []
             all_setups = []
+            all_candidates = []
             total_obs = 0
             total_trades = 0
             candles_by_asset = {}
             for asset in ASSETS:
+                # Skip si actif blackliste (trop de rejets MT5 dans la session)
+                if _mt5_reject_count.get(asset, 0) >= MT5_REJECT_THRESHOLD:
+                    continue
                 res = process_asset(asset, predictor, pusher, mt5_exec, balance)
                 total_obs += res["n_obs"]
-                total_trades += res["trades_taken"]
                 all_rejets.extend(res["rejets"])
                 all_setups.extend(res["setups"])
-                # Capture candles seulement si rejets/setups (pertinent pour dashboard)
-                if (res["rejets"] or res["setups"]) and res.get("candles"):
+                # Capture candles seulement si pertinent pour dashboard
+                if (res["rejets"] or res["setups"] or res["candidates"]) and res.get("candles"):
                     candles_by_asset[asset] = res["candles"]
+                # Candidats ML accepte : on collecte pour tri/cooldown global
+                for c in res["candidates"]:
+                    c["candles"] = res.get("candles")
+                    all_candidates.append(c)
                 if res["errors"]:
                     for e in res["errors"]:
                         log.warning(f"  {asset} : {e}")
 
+            # FIX RAFALES : trie candidats par proba decroissante, applique cooldown par famille,
+            # garde au max MAX_TRADES_PER_CYCLE par cycle.
+            all_candidates.sort(key=lambda c: c["proba"], reverse=True)
+            now_main = pd.Timestamp.now(tz="UTC")
+            trades_this_cycle = 0
+            families_used: set[str] = set()
+            for c in all_candidates:
+                if trades_this_cycle >= MAX_TRADES_PER_CYCLE:
+                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "skipped": "max_per_cycle"})
+                    continue
+                # Famille = symbol de base (EURUSD -> EUR, XAUUSD -> XAU, NAS100 -> IDX)
+                fam = family_of(c["asset"])
+                last = _family_last_trade.get(fam)
+                if last and (now_main - last).total_seconds() / 60 < FAMILY_COOLDOWN_MIN:
+                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "skipped": "cooldown_family", "family": fam})
+                    log.info(f"  {c['asset']} skip : cooldown famille {fam} ({(now_main-last).total_seconds()/60:.1f}min < {FAMILY_COOLDOWN_MIN}min)")
+                    continue
+                if fam in families_used:
+                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "skipped": "family_already_in_cycle", "family": fam})
+                    log.info(f"  {c['asset']} skip : famille {fam} deja tradee ce cycle")
+                    continue
+                # Execute
+                exec_result = execute_trade(mt5_exec, c["asset"], c["setup"], c["proba"], balance, c["ob"], c["killzone"], pusher)
+                status = exec_result.get("status", "FAIL")
+                if status == "OK":
+                    pusher.push_setup(
+                        instrument=c["asset"], ts=c["validation_ts"],
+                        direction=c["direction"], entry_price=c["setup"].entry_price,
+                        sl=c["setup"].stop_loss, tp=c["setup"].take_profit,
+                        rr=c["setup"].rr, score=c["score"],
+                        ml_proba=c["proba"], killzone=c["killzone"],
+                        candles=c.get("candles"),
+                    )
+                    trades_this_cycle += 1
+                    families_used.add(fam)
+                    _family_last_trade[fam] = now_main
+                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "proba_v20": c["proba_v20"]})
+                else:
+                    # SETUP_CANCELLED -> push dashboard + audit + tracker MT5_REJECT
+                    if status == "MT5_REJECT":
+                        _mt5_reject_count[c["asset"]] = _mt5_reject_count.get(c["asset"], 0) + 1
+                        if _mt5_reject_count[c["asset"]] >= MT5_REJECT_THRESHOLD:
+                            log.warning(f"  {c['asset']} : {_mt5_reject_count[c['asset']]} rejets MT5 -> blackliste pour la session")
+                    try:
+                        pusher.push_setup_cancelled(
+                            instrument=c["asset"], ts=c["validation_ts"],
+                            direction=c["direction"], entry_price=c["setup"].entry_price,
+                            sl=c["setup"].stop_loss, tp=c["setup"].take_profit,
+                            rr=c["setup"].rr, score=c["score"], ml_proba=c["proba"],
+                            cancel_reason=status, cancel_detail=exec_result.get("detail"),
+                            spread_pct=exec_result.get("spread_pct"),
+                            max_spread_pct=exec_result.get("max_spread_pct"),
+                            killzone=c["killzone"], candles=c.get("candles"),
+                        )
+                    except Exception as e:
+                        log.warning(f"push_setup_cancelled fail {c['asset']}: {e}")
+                    _audit.log(
+                        asset=c["asset"], direction=c["direction"],
+                        ob_validation_ts=str(c["validation_ts"]),
+                        setup_entry=float(c["setup"].entry_price),
+                        setup_sl=float(c["setup"].stop_loss),
+                        setup_tp=float(c["setup"].take_profit),
+                        proba_v21=float(c["proba"]),
+                        decision="SETUP_CANCELLED",
+                        cancel_reason=status,
+                        cancel_detail=exec_result.get("detail"),
+                        spread_pct=exec_result.get("spread_pct"),
+                    )
+                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "cancelled": status})
+            total_trades = trades_this_cycle
+
             elapsed = time.time() - t0
-            log.info(f"  Total : {total_obs} OBs | {len(all_setups)} setups | {len(all_rejets)} rejets | {total_trades} trades (cycle {elapsed:.1f}s)")
+            log.info(f"  Total : {total_obs} OBs | {len(all_candidates)} candidats | {total_trades} trades passes | {len(all_rejets)} rejets ML (cycle {elapsed:.1f}s)")
 
             pusher.push_cycle(
                 actifs_scanned=len(ASSETS),
