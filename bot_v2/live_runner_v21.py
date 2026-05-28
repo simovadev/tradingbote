@@ -74,7 +74,7 @@ BROKER_MAP = {
     "NZDUSD":    "NZDUSD+",
     "USDMXN":    "USDMXN+",
     "BTCUSD":    "BTCUSD",
-    "ETHUSD":    "ETHUSD",
+    # ETHUSD : retire (spread trop large -> setups annules systematiquement)
     "CL-OIL":    "CL-OIL",
     "NAS100":    "NAS100",
     "XAGUSD":    "XAGUSD",
@@ -113,7 +113,7 @@ BROKER_MAP = {
 
 MIN_SL_PCT = {
     # Crypto (broker exige beaucoup)
-    "BTCUSD":  0.0015, "ETHUSD":  0.0015, "LTCUSD":  0.025,
+    "BTCUSD":  0.0015, "LTCUSD":  0.025,
     "XRPUSD":  0.015,  "ADAUSD":  0.04,   "BCHUSD":  0.015,
     "DOTUSD":  0.05,   "LNKUSD":  0.02,   "SOLUSD":  0.02,
     # Metaux
