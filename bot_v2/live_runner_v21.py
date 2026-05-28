@@ -167,10 +167,6 @@ RECENT_CUTOFF_MIN = int(os.environ["RECENT_CUTOFF_MIN"])
 BOT_MAGIC = 21000  # V21
 MAX_CONCURRENT_TRADES = 5
 
-# Limite anti-rafales : N max trades par cycle, cooldown par devise/famille
-MAX_TRADES_PER_CYCLE = int(os.getenv("MAX_TRADES_PER_CYCLE", "3"))
-FAMILY_COOLDOWN_MIN = int(os.getenv("FAMILY_COOLDOWN_MIN", "10"))  # min entre 2 trades d'une meme devise
-
 _seen_obs: set[tuple] = set()
 _boot_ts: pd.Timestamp | None = None
 _ref_cache: dict[str, pd.DataFrame] = {}  # cache des df_m15 ref par cycle
@@ -180,13 +176,6 @@ _audit = TradeAuditLogger()  # log forensic V21 (chaque OB detecte + decision)
 
 # Offset broker : Vantage RAW ECN = UTC+3 (GMT+3 MSK). Detecte au boot via tick BTCUSD 24/7.
 BROKER_OFFSET_SEC: int = 0  # set par detect_broker_offset() au boot
-
-# Cooldown par famille de devise : dernier trade par symbole de base
-_family_last_trade: dict[str, pd.Timestamp] = {}
-
-# Compteur d'actifs en echec MT5 recurrent (>= 3 rejets dans la session -> skip)
-_mt5_reject_count: dict[str, int] = {}
-MT5_REJECT_THRESHOLD = int(os.getenv("MT5_REJECT_THRESHOLD", "3"))
 
 
 def detect_broker_offset() -> int:
@@ -689,9 +678,6 @@ def main():
             total_trades = 0
             candles_by_asset = {}
             for asset in ASSETS:
-                # Skip si actif blackliste (trop de rejets MT5 dans la session)
-                if _mt5_reject_count.get(asset, 0) >= MT5_REJECT_THRESHOLD:
-                    continue
                 res = process_asset(asset, predictor, pusher, mt5_exec, balance)
                 total_obs += res["n_obs"]
                 all_rejets.extend(res["rejets"])
@@ -699,7 +685,7 @@ def main():
                 # Capture candles seulement si pertinent pour dashboard
                 if (res["rejets"] or res["setups"] or res["candidates"]) and res.get("candles"):
                     candles_by_asset[asset] = res["candles"]
-                # Candidats ML accepte : on collecte pour tri/cooldown global
+                # Candidats ML accepte (proba >= 0.80) : trade immediat sans tri ni cooldown
                 for c in res["candidates"]:
                     c["candles"] = res.get("candles")
                     all_candidates.append(c)
@@ -707,28 +693,9 @@ def main():
                     for e in res["errors"]:
                         log.warning(f"  {asset} : {e}")
 
-            # FIX RAFALES : trie candidats par proba decroissante, applique cooldown par famille,
-            # garde au max MAX_TRADES_PER_CYCLE par cycle.
-            all_candidates.sort(key=lambda c: c["proba"], reverse=True)
-            now_main = pd.Timestamp.now(tz="UTC")
-            trades_this_cycle = 0
-            families_used: set[str] = set()
+            # Chaque candidat valide ML = trade immediat (pas de limite cycle, pas de cooldown).
+            # La protection contre les pertes vient du seuil V21 >= 0.80 (WR 87% attendu).
             for c in all_candidates:
-                if trades_this_cycle >= MAX_TRADES_PER_CYCLE:
-                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "skipped": "max_per_cycle"})
-                    continue
-                # Famille = symbol de base (EURUSD -> EUR, XAUUSD -> XAU, NAS100 -> IDX)
-                fam = family_of(c["asset"])
-                last = _family_last_trade.get(fam)
-                if last and (now_main - last).total_seconds() / 60 < FAMILY_COOLDOWN_MIN:
-                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "skipped": "cooldown_family", "family": fam})
-                    log.info(f"  {c['asset']} skip : cooldown famille {fam} ({(now_main-last).total_seconds()/60:.1f}min < {FAMILY_COOLDOWN_MIN}min)")
-                    continue
-                if fam in families_used:
-                    all_setups.append({"asset": c["asset"], "proba": c["proba"], "skipped": "family_already_in_cycle", "family": fam})
-                    log.info(f"  {c['asset']} skip : famille {fam} deja tradee ce cycle")
-                    continue
-                # Execute
                 exec_result = execute_trade(mt5_exec, c["asset"], c["setup"], c["proba"], balance, c["ob"], c["killzone"], pusher)
                 status = exec_result.get("status", "FAIL")
                 if status == "OK":
@@ -740,16 +707,10 @@ def main():
                         ml_proba=c["proba"], killzone=c["killzone"],
                         candles=c.get("candles"),
                     )
-                    trades_this_cycle += 1
-                    families_used.add(fam)
-                    _family_last_trade[fam] = now_main
+                    total_trades += 1
                     all_setups.append({"asset": c["asset"], "proba": c["proba"], "proba_v20": c["proba_v20"]})
                 else:
-                    # SETUP_CANCELLED -> push dashboard + audit + tracker MT5_REJECT
-                    if status == "MT5_REJECT":
-                        _mt5_reject_count[c["asset"]] = _mt5_reject_count.get(c["asset"], 0) + 1
-                        if _mt5_reject_count[c["asset"]] >= MT5_REJECT_THRESHOLD:
-                            log.warning(f"  {c['asset']} : {_mt5_reject_count[c['asset']]} rejets MT5 -> blackliste pour la session")
+                    # SETUP_CANCELLED -> push dashboard + audit
                     try:
                         pusher.push_setup_cancelled(
                             instrument=c["asset"], ts=c["validation_ts"],
@@ -776,7 +737,6 @@ def main():
                         spread_pct=exec_result.get("spread_pct"),
                     )
                     all_setups.append({"asset": c["asset"], "proba": c["proba"], "cancelled": status})
-            total_trades = trades_this_cycle
 
             elapsed = time.time() - t0
             log.info(f"  Total : {total_obs} OBs | {len(all_candidates)} candidats | {total_trades} trades passes | {len(all_rejets)} rejets ML (cycle {elapsed:.1f}s)")
