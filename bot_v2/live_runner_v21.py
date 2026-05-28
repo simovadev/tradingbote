@@ -350,6 +350,10 @@ def process_asset(asset: str, predictor: V21Predictor,
                     )
                     res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
                                            "direction": ob.direction, "reason": reason or "no_trade"})
+                    # REGLE STRICTE : 1 OB = 1 evaluation max. Si ICT_REJECT, on oublie cet OB
+                    # a vie. Sinon le pipeline ICT re-evaluerait avec des bougies plus
+                    # recentes -> trade en retard quand les conditions changent.
+                    _seen_obs.add(ob_key)
                     continue
                 # V21 predict (decideur, cross-asset)
                 try:
@@ -562,26 +566,51 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         # Capture market price avant envoi pour calcul slippage
         pre_tick = mt5.symbol_info_tick(bsym)
         pre_price = pre_tick.ask if direction == "bullish" else (pre_tick.bid if pre_tick else market_price)
-        result = mt5_exec.place_market_order(
-            symbol=bsym, direction=direction, volume=lots,
-            sl=sl, tp=tp, comment=comment, magic=BOT_MAGIC,
-        )
+
+        # FIX ENTRY-ZONE : entry doit etre dans la zone OB (entre top et bottom).
+        # Pour un BUY bullish, zone = [SL_original, entry_OB] (bottom = SL, top = entry).
+        # Si market_price est DEJA dans la zone -> ordre MARKET (entry immediate).
+        # Si market_price a quitte la zone -> ordre LIMIT au entry_OB (attendre retest).
+        # Comme ca on ne rentre JAMAIS hors zone OB.
+        in_zone = False
+        if direction == "bullish":
+            # Zone OB = [sl_original (bottom), entry (top)]
+            in_zone = sl_original <= pre_price <= entry
+        else:
+            # Zone OB = [entry (bottom), sl_original (top)]
+            in_zone = entry <= pre_price <= sl_original
+
+        if in_zone:
+            result = mt5_exec.place_market_order(
+                symbol=bsym, direction=direction, volume=lots,
+                sl=sl, tp=tp, comment=comment, magic=BOT_MAGIC,
+            )
+            order_kind = "MARKET"
+        else:
+            # Price hors zone OB -> LIMIT au prix de l'OB, attendre le retest
+            result = mt5_exec.place_limit_order(
+                symbol=bsym, direction=direction, volume=lots,
+                entry_price=entry, sl=sl, tp=tp,
+                comment=comment + " LIMIT", magic=BOT_MAGIC,
+            )
+            order_kind = "LIMIT"
+
         if result is None:
-            log.warning(f"{asset} : ordre rejete par MT5")
+            log.warning(f"{asset} : ordre {order_kind} rejete par MT5")
             _audit.log(
                 asset=asset, direction=direction,
                 ob_setup_entry=float(entry), ob_setup_sl=float(sl), ob_setup_tp=float(tp),
                 lots=float(lots), market_price=float(pre_price),
                 proba_v21=float(proba),
-                decision="MT5_REJECT", mt5_error="place_market_order returned None",
+                decision="MT5_REJECT", mt5_error=f"place_{order_kind.lower()}_order returned None",
             )
-            return {"status": "MT5_REJECT", "detail": "place_market_order returned None"}
+            return {"status": "MT5_REJECT", "detail": f"place_{order_kind.lower()}_order returned None"}
         slippage = result["price"] - pre_price
         log.info(
-            f"TRADE OK {asset} {direction} entry={result['price']:.5f} "
+            f"TRADE OK {asset} {direction} {order_kind} entry={result['price']:.5f} "
             f"SL={sl:.5f} (OB={sl_original:.5f} +spread {spread_abs:.5f}) "
             f"TP={tp:.5f} vol={result['volume']:.2f} "
-            f"rr={rr:.2f} ml={proba:.3f} slippage={slippage:+.5f}"
+            f"rr={rr:.2f} ml={proba:.3f} pre_market={pre_price:.5f} in_zone={in_zone}"
         )
         _audit.log(
             asset=asset, direction=direction, ticket=int(result["ticket"]),
@@ -797,11 +826,16 @@ def main():
                                             candles_by_asset=candles_by_asset if candles_by_asset else None)
                 log.info(f"  Pushed {len(rejets_fmt)} rejets ({len(candles_by_asset)} charts) au dashboard")
 
-            # Cleanup _seen_obs tous les 120 cycles (~30 min en cycle 15s)
-            if cycle_n % 120 == 0:
+            # PAS de cleanup _seen_obs : un OB evalue une seule fois, point.
+            # Si on cleanup, V21 peut dire NON puis OUI sur le meme OB plus tard
+            # (apres que le price ait deja bouge) -> trade en retard, RR cassé.
+            # Cap memoire : garde les 10000 dernieres entrees (au-dela, on supprime
+            # les plus vieilles via FIFO).
+            if cycle_n % 240 == 0 and len(_seen_obs) > 10000:
+                log.info(f"  _seen_obs cap : {len(_seen_obs)} entries, garde les 5000 plus recentes")
+                # set non ordonne -> simple : on garde 5000 random (perte de qq vieilles entrees OK)
                 global _seen_obs
-                _seen_obs.clear()
-                log.info(f"  _seen_obs cleanup (cycle {cycle_n})")
+                _seen_obs = set(list(_seen_obs)[-5000:])
 
             # Flush spreads + audit toutes les 10 cycles (~2.5 min en cycle 15s)
             if cycle_n % 10 == 0:
