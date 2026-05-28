@@ -493,26 +493,9 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         if sl_distance <= 0:
             return {"status": "FAIL", "detail": "sl_distance <= 0"}
 
-        # CHECK SPREAD : si spread > seuil actif -> setup ANNULE (trop cher a trader)
+        # SPREAD CHECK retire : trop de bons setups bloques. MT5 decidera si l'ordre passe.
         mid = (tick.ask + tick.bid) / 2 if tick.bid > 0 else market_price
         spread_pct = (spread_abs / mid * 100) if mid > 0 else 0
-        max_spread = MAX_SPREAD_PCT.get(asset, MAX_SPREAD_PCT_DEFAULT)
-        # Egalement : spread doit pas bouffer plus de 25% du SL distance
-        sl_in_pct = (sl_distance / mid * 100) if mid > 0 else 0
-        spread_vs_sl = (spread_abs / sl_distance) if sl_distance > 0 else 1
-        if spread_pct > max_spread or spread_vs_sl > 0.25:
-            log.warning(
-                f"{asset} : spread trop eleve "
-                f"(spread={spread_pct:.4f}% > max {max_spread:.4f}% "
-                f"OR spread/SL={spread_vs_sl:.1%}) -> setup ANNULE"
-            )
-            return {
-                "status": "SPREAD_TOO_HIGH",
-                "detail": f"spread={spread_pct:.4f}% (max {max_spread:.4f}%) ; spread/SL={spread_vs_sl:.1%}",
-                "spread_pct": round(spread_pct, 4),
-                "max_spread_pct": max_spread,
-                "spread_vs_sl_pct": round(spread_vs_sl * 100, 1),
-            }
 
         # SL/TP ICT STRICT : NE JAMAIS modifier le SL/TP de l'OB.
         # Si le SL est sous le minimum broker -> SKIP le trade (pas elargir).
@@ -538,30 +521,8 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         lots = max(info.volume_min, round(lots / info.volume_step) * info.volume_step)
         lots = min(lots, info.volume_max)
 
-        # CHECK MARGE : reduire lots si depasse marge disponible (broker rejette retcode 10019)
-        order_type = mt5.ORDER_TYPE_BUY if direction == "bullish" else mt5.ORDER_TYPE_SELL
-        try:
-            margin_needed = mt5.order_calc_margin(order_type, bsym, lots, market_price)
-        except Exception:
-            margin_needed = None
-        acc = mt5.account_info()
-        free_margin = acc.margin_free if acc else 0
-        # Garde 20% buffer de marge libre (pour les autres positions)
-        max_margin = free_margin * 0.80
-        if margin_needed and margin_needed > max_margin:
-            ratio = max_margin / margin_needed
-            lots_reduced = max(info.volume_min, round(lots * ratio / info.volume_step) * info.volume_step)
-            if lots_reduced * risk_per_lot < risk_eur * 0.2:
-                log.warning(f"{asset} : marge insuffisante (need {margin_needed:.0f}, max {max_margin:.0f}) "
-                              f"= skip (risk effectif {lots_reduced*risk_per_lot:.2f} < 20% target)")
-                return {
-                    "status": "MARGIN",
-                    "detail": f"margin_need={margin_needed:.0f} > max_avail={max_margin:.0f}",
-                    "margin_needed": float(margin_needed),
-                    "margin_free": float(free_margin),
-                }
-            log.info(f"{asset} : lot reduit {lots} -> {lots_reduced} (marge)")
-            lots = lots_reduced
+        # MARGIN CHECK retire : trop de bons setups bloques quand le compte est charge.
+        # On laisse MT5 decider, il rejettera l'ordre si vraiment plus de marge (-> MT5_REJECT).
         comment = f"V21-{direction[0].upper()} ml={proba:.2f}"
         # Capture market price avant envoi pour calcul slippage
         pre_tick = mt5.symbol_info_tick(bsym)
