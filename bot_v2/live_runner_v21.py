@@ -339,23 +339,17 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         sl_distance = abs(market_price - sl)
         if sl_distance <= 0:
             return False
+        # SL/TP ICT STRICT : NE JAMAIS modifier le SL/TP de l'OB.
+        # Si le SL est sous le minimum broker -> SKIP le trade (pas elargir).
         stops_level = getattr(info, "trade_stops_level", 0) * info.point
         min_pct = MIN_SL_PCT.get(asset)
         if min_pct:
-            min_dist_pct = market_price * min_pct
-            min_required = max(stops_level, min_dist_pct)
+            min_required = max(stops_level, market_price * min_pct)
         else:
             min_required = stops_level
         if min_required > 0 and sl_distance < min_required:
-            sl_extra = min_required - sl_distance
-            if direction == "bullish":
-                sl = sl - sl_extra
-                tp = tp + sl_extra * rr
-            else:
-                sl = sl + sl_extra
-                tp = tp - sl_extra * rr
-            sl_distance = abs(market_price - sl)
-            log.info(f"{asset} SL elargi a {sl_distance:.5f}")
+            log.info(f"{asset} : SL ICT trop serre ({sl_distance:.5f} < min broker {min_required:.5f}) -> SKIP")
+            return False
         n_ticks = sl_distance / tick_size
         risk_per_lot = n_ticks * tick_value
         if risk_per_lot <= 0:
