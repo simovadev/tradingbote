@@ -435,6 +435,12 @@ def main():
                 pnl_total=0, balance=balance, equity=account.equity if account else 0,
                 positions_open=n_total_open, pending_orders=0,
             )
+            # Sync positions reelles MT5 -> dashboard marquera CANCELLED les pending fantomes
+            open_pos = [{"ticket": p.ticket, "pnl": p.profit} for p in positions]
+            pending_orders = mt5.orders_get() or []
+            pending_tickets = [o.ticket for o in pending_orders]
+            pusher.push_positions_sync(open_positions=open_pos, pending_tickets=pending_tickets)
+
             if all_rejets:
                 pusher.push_rejected_batch(all_rejets[:50])
                 log.info(f"  Pushed {min(len(all_rejets), 50)} rejets au dashboard")
