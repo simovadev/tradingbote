@@ -59,6 +59,7 @@ from bot_v2.mt5_executor import MT5Executor
 from bot_v2.v21_inference import V21Predictor, REF_ASSETS, M15_LEN
 from bot_v2.v20_inference import V20Predictor  # shadow: affiche aussi proba V20 pour comparaison
 from bot_v2.push_dashboard import DashboardPusher
+from bot_v2.spread_logger import SpreadLogger
 
 # Mapping nom V20 -> nom broker MT5 (meme que V20)
 BROKER_MAP = {
@@ -142,6 +143,8 @@ MAX_CONCURRENT_TRADES = 5
 _seen_obs: set[tuple] = set()
 _boot_ts: pd.Timestamp | None = None
 _ref_cache: dict[str, pd.DataFrame] = {}  # cache des df_m15 ref par cycle
+_spread_logger = SpreadLogger()  # log spreads pour stats futures
+_cycle_spreads: dict[str, dict] = {}  # spread_pct + spread_points du tick courant par actif
 
 
 def broker_sym(asset: str) -> str:
@@ -174,6 +177,24 @@ def process_asset(asset: str, predictor: V21Predictor,
                    balance: float) -> dict:
     res = {"asset": asset, "n_obs": 0, "rejets": [], "setups": [],
            "trades_taken": 0, "errors": [], "candles": None}
+    # Capture spread courant pour cet actif
+    bsym = broker_sym(asset)
+    info = mt5.symbol_info(bsym)
+    tick = mt5.symbol_info_tick(bsym)
+    spread_pct = None
+    spread_points = None
+    if info and tick and tick.bid > 0 and tick.ask > tick.bid:
+        spread_abs = tick.ask - tick.bid
+        mid = (tick.ask + tick.bid) / 2
+        spread_pct = round(spread_abs / mid * 100, 4)
+        spread_points = round(spread_abs / info.point if info.point > 0 else 0, 1)
+        _cycle_spreads[asset] = {"spread_pct": spread_pct, "spread_points": spread_points}
+        # Log pour stats futures
+        try:
+            _spread_logger.log_tick(datetime.now(timezone.utc), asset, tick.ask, tick.bid, info.point)
+        except Exception:
+            pass
+
     try:
         df_m1 = fetch_ohlcv(asset, mt5.TIMEFRAME_M1, 500)
         # Capture 60 dernieres M1 pour graphique dashboard (uniquement si setup pertinent)
@@ -500,8 +521,10 @@ def main():
 
             if all_rejets:
                 # Convertir 'asset' -> 'instrument' pour compat dashboard
-                rejets_fmt = [
-                    {
+                rejets_fmt = []
+                for r in all_rejets[:50]:
+                    sp = _cycle_spreads.get(r.get("asset", "?"), {})
+                    rejets_fmt.append({
                         "instrument": r.get("asset", "?"),
                         "ts": r.get("ts", ""),
                         "direction": r.get("direction", "?"),
@@ -513,9 +536,9 @@ def main():
                         "sl": r.get("sl"),
                         "tp": r.get("tp"),
                         "rr": r.get("rr"),
-                    }
-                    for r in all_rejets[:50]
-                ]
+                        "spread_pct": sp.get("spread_pct"),
+                        "spread_points": sp.get("spread_points"),
+                    })
                 pusher.push_rejected_batch(rejets_fmt,
                                             candles_by_asset=candles_by_asset if candles_by_asset else None)
                 log.info(f"  Pushed {len(rejets_fmt)} rejets ({len(candles_by_asset)} charts) au dashboard")
@@ -525,6 +548,13 @@ def main():
                 global _seen_obs
                 _seen_obs.clear()
                 log.info("  _seen_obs cleanup (cycle 30)")
+
+            # Flush spreads logger toutes les 10 min
+            if cycle_n % 10 == 0:
+                try:
+                    _spread_logger.flush()
+                except Exception as e:
+                    log.warning(f"spread_logger flush fail : {e}")
 
             # Sleep jusqu'a la prochaine minute boundary
             next_minute = now.replace(second=0, microsecond=0) + pd.Timedelta(minutes=1)
