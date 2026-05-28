@@ -109,12 +109,24 @@ BROKER_MAP = {
 }
 
 MIN_SL_PCT = {
-    "BTCUSD":  0.001, "ETHUSD":  0.001, "LTCUSD":  0.001,
-    "XRPUSD":  0.001, "ADAUSD":  0.001, "BCHUSD":  0.001,
-    "DOTUSD":  0.001, "LNKUSD":  0.001, "SOLUSD":  0.001,
-    "XPDUSD":  0.0005, "XPTUSD":  0.0005,
-    "USDZAR":  0.0005, "USDTRY":  0.0005, "USDMXN":  0.0005,
-    "EURHUF":  0.0005,
+    # Crypto (broker exige > 0.1% min)
+    "BTCUSD":  0.0015, "ETHUSD":  0.0015, "LTCUSD":  0.002,
+    "XRPUSD":  0.002,  "ADAUSD":  0.005,  "BCHUSD":  0.002,
+    "DOTUSD":  0.008,  "LNKUSD":  0.015,  "SOLUSD":  0.015,
+    # Metaux
+    "XPDUSD":  0.005,  "XPTUSD":  0.005,
+    "XAUJPY":  0.001,
+    # Forex exotiques (besoin plus large)
+    "USDZAR":  0.002,  "USDTRY":  0.005,  "USDMXN":  0.002,
+    "USDNOK":  0.002,  "USDSEK":  0.002,  "USDDKK":  0.001,
+    "USDPLN":  0.002,
+    "EURHUF":  0.002,  "EURPLN":  0.002,
+    "EURNOK":  0.002,  "EURSEK":  0.002,  "EURCZK":  0.002,
+    # Indices europe/asia (souvent stops_level eleve)
+    "GER40":   0.001,  "FRA40":   0.001,  "UK100":   0.001,
+    "Nikkei225": 0.001,
+    # Softs
+    "Cotton-C": 0.005,
 }
 
 ASSETS = list(BROKER_MAP.keys())
