@@ -1,0 +1,7 @@
+{
+  "adversarial_auc": 0.5254867795137401,
+  "verdict": "CLEAN (train/OOS identiques, model genuine universel)",
+  "n_train_sample": 30000,
+  "n_oos_sample": 30000,
+  "n_features": 13
+}
