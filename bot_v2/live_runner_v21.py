@@ -268,6 +268,7 @@ def process_asset(asset: str, predictor: V21Predictor,
                         sl=setup.stop_loss, tp=setup.take_profit,
                         rr=setup.rr, score=r.score or 0,
                         ml_proba=proba, killzone=kz,
+                        candles=res.get("candles"),  # graphique pour le SETUP
                     )
                     if execute_trade(mt5_exec, asset, setup, proba, balance, ob, kz, pusher):
                         res["trades_taken"] += 1

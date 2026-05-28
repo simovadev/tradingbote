@@ -259,6 +259,34 @@ class DashboardPusher:
             "pending_orders": int(pending_orders),
         })
 
+    def push_position_live(
+        self,
+        instrument: str,
+        ticket: int,
+        direction: str,
+        entry: float,
+        sl: float,
+        tp: float,
+        current_price: float,
+        pnl: float,
+        candles: list[dict],
+    ) -> None:
+        """Push l'etat live d'une position ouverte avec bougies recentes.
+
+        Permet au dashboard d'afficher graphiquement la progression du trade
+        (prix actuel vs entry/SL/TP) en temps reel.
+        """
+        self.push_event("POSITION_LIVE", {
+            "ticket": int(ticket),
+            "direction": direction,
+            "entry": float(entry),
+            "sl": float(sl),
+            "tp": float(tp),
+            "current_price": float(current_price),
+            "pnl": float(pnl),
+            "candles": candles,
+        }, instrument=instrument)
+
     def push_positions_sync(
         self,
         open_positions: list[dict[str, Any]],
