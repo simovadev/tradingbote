@@ -170,9 +170,17 @@ def process_asset(asset: str, predictor: V21Predictor,
                    pusher: DashboardPusher, mt5_exec: MT5Executor,
                    balance: float) -> dict:
     res = {"asset": asset, "n_obs": 0, "rejets": [], "setups": [],
-           "trades_taken": 0, "errors": []}
+           "trades_taken": 0, "errors": [], "candles": None}
     try:
         df_m1 = fetch_ohlcv(asset, mt5.TIMEFRAME_M1, 500)
+        # Capture 60 dernieres M1 pour graphique dashboard (uniquement si setup pertinent)
+        if df_m1 is not None and len(df_m1) >= 60:
+            _tail = df_m1.tail(60)
+            res["candles"] = [
+                {"t": int(ts.timestamp()), "o": float(r["open"]), "h": float(r["high"]),
+                 "l": float(r["low"]), "c": float(r["close"])}
+                for ts, r in _tail.iterrows()
+            ]
         df_m15 = fetch_ohlcv(asset, mt5.TIMEFRAME_M15, 200)
         df_h1 = fetch_ohlcv(asset, mt5.TIMEFRAME_H1, 200)
         df_d1 = fetch_ohlcv(asset, mt5.TIMEFRAME_D1, 60)
@@ -240,8 +248,13 @@ def process_asset(asset: str, predictor: V21Predictor,
                             df_ltf=df_m1, df_d1=df_d1, mss_setups=None, df_htf=df_m15,
                         )
                         proba_v20 = v20.predict_one(feats, asset, df_m1, df_m15, df_h1, ob.validation_ts)
-                    except Exception:
+                    except Exception as e:
+                        log.warning(f"  V20 shadow predict {asset} fail : {type(e).__name__}: {str(e)[:120]}")
                         proba_v20 = None
+                else:
+                    if not hasattr(log, "_v20_warned"):
+                        log.warning("V20Predictor.get_instance() = None (shadow disabled)")
+                        log._v20_warned = True
 
                 _seen_obs.add(ob_key)
                 kz = killzone_at(ob.validation_ts) or "None"
@@ -427,12 +440,16 @@ def main():
             all_setups = []
             total_obs = 0
             total_trades = 0
+            candles_by_asset = {}
             for asset in ASSETS:
                 res = process_asset(asset, predictor, pusher, mt5_exec, balance)
                 total_obs += res["n_obs"]
                 total_trades += res["trades_taken"]
                 all_rejets.extend(res["rejets"])
                 all_setups.extend(res["setups"])
+                # Capture candles seulement si rejets/setups (pertinent pour dashboard)
+                if (res["rejets"] or res["setups"]) and res.get("candles"):
+                    candles_by_asset[asset] = res["candles"]
                 if res["errors"]:
                     for e in res["errors"]:
                         log.warning(f"  {asset} : {e}")
@@ -475,8 +492,9 @@ def main():
                     }
                     for r in all_rejets[:50]
                 ]
-                pusher.push_rejected_batch(rejets_fmt)
-                log.info(f"  Pushed {len(rejets_fmt)} rejets au dashboard")
+                pusher.push_rejected_batch(rejets_fmt,
+                                            candles_by_asset=candles_by_asset if candles_by_asset else None)
+                log.info(f"  Pushed {len(rejets_fmt)} rejets ({len(candles_by_asset)} charts) au dashboard")
 
             # Cleanup _seen_obs tous les 30 cycles (retention 2h)
             if cycle_n % 30 == 0:
