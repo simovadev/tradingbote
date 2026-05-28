@@ -428,7 +428,7 @@ def main():
                 actifs_scanned=len(ASSETS),
                 total_s=elapsed,
                 fetch_s=0, compute_s=elapsed,
-                latencies={},
+                latencies={a: 0 for a in ASSETS},
             )
             pusher.push_stats(
                 total=cycle_n, wins=0, losses=0, wr_pct=0,
@@ -442,8 +442,24 @@ def main():
             pusher.push_positions_sync(open_positions=open_pos, pending_tickets=pending_tickets)
 
             if all_rejets:
-                pusher.push_rejected_batch(all_rejets[:50])
-                log.info(f"  Pushed {min(len(all_rejets), 50)} rejets au dashboard")
+                # Convertir 'asset' -> 'instrument' pour compat dashboard
+                rejets_fmt = [
+                    {
+                        "instrument": r.get("asset", "?"),
+                        "ts": r.get("ts", ""),
+                        "direction": r.get("direction", "?"),
+                        "reason": r.get("reason", "?"),
+                        "ml_proba": r.get("proba"),
+                        "threshold": r.get("threshold"),
+                        "entry": r.get("entry"),
+                        "sl": r.get("sl"),
+                        "tp": r.get("tp"),
+                        "rr": r.get("rr"),
+                    }
+                    for r in all_rejets[:50]
+                ]
+                pusher.push_rejected_batch(rejets_fmt)
+                log.info(f"  Pushed {len(rejets_fmt)} rejets au dashboard")
 
             # Cleanup _seen_obs tous les 30 cycles (retention 2h)
             if cycle_n % 30 == 0:
