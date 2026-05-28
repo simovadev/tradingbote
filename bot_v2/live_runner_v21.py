@@ -57,6 +57,7 @@ from bot_v2.concepts.daily_bias import build_d1_from_h1
 from bot_v2.pipeline import evaluate_ob
 from bot_v2.mt5_executor import MT5Executor
 from bot_v2.v21_inference import V21Predictor, REF_ASSETS, M15_LEN
+from bot_v2.v20_inference import V20Predictor  # shadow: affiche aussi proba V20 pour comparaison
 from bot_v2.push_dashboard import DashboardPusher
 
 # Mapping nom V20 -> nom broker MT5 (meme que V20)
@@ -211,7 +212,7 @@ def process_asset(asset: str, predictor: V21Predictor,
                     res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
                                            "direction": ob.direction, "reason": reason or "no_trade"})
                     continue
-                # V21 predict (avec cross-asset)
+                # V21 predict (decideur, cross-asset)
                 try:
                     proba = predictor.predict_one(
                         ts=ob.validation_ts,
@@ -228,6 +229,20 @@ def process_asset(asset: str, predictor: V21Predictor,
                                            "direction": ob.direction, "reason": "V21_unavailable"})
                     continue
 
+                # V20 predict SHADOW (display only, comparaison)
+                proba_v20 = None
+                v20 = V20Predictor.get_instance()
+                if v20 is not None:
+                    try:
+                        from bot_v2 import ml_filter
+                        feats = ml_filter._features_from_result(
+                            r, ob, asset,
+                            df_ltf=df_m1, df_d1=df_d1, mss_setups=None, df_htf=df_m15,
+                        )
+                        proba_v20 = v20.predict_one(feats, asset, df_m1, df_m15, df_h1, ob.validation_ts)
+                    except Exception:
+                        proba_v20 = None
+
                 _seen_obs.add(ob_key)
                 kz = killzone_at(ob.validation_ts) or "None"
                 setup = r.trade_setup
@@ -243,13 +258,14 @@ def process_asset(asset: str, predictor: V21Predictor,
                     )
                     if execute_trade(mt5_exec, asset, setup, proba, balance, ob, kz, pusher):
                         res["trades_taken"] += 1
-                    res["setups"].append({"asset": asset, "proba": proba})
+                    res["setups"].append({"asset": asset, "proba": proba, "proba_v20": proba_v20})
                 else:
                     res["rejets"].append({
                         "asset": asset, "ts": ob.validation_ts.isoformat(),
                         "direction": ob.direction,
                         "reason": f"ml_below_thr_{proba:.3f}",
-                        "proba": proba, "threshold": THRESHOLD,
+                        "proba": proba, "proba_v20": proba_v20,
+                        "threshold": THRESHOLD,
                         "entry": setup.entry_price,
                         "sl": setup.stop_loss, "tp": setup.take_profit, "rr": setup.rr,
                     })
@@ -450,6 +466,7 @@ def main():
                         "direction": r.get("direction", "?"),
                         "reason": r.get("reason", "?"),
                         "ml_proba": r.get("proba"),
+                        "ml_proba_v20": r.get("proba_v20"),  # shadow
                         "threshold": r.get("threshold"),
                         "entry": r.get("entry"),
                         "sl": r.get("sl"),
