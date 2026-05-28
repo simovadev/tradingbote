@@ -338,6 +338,26 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         lots = risk_eur / risk_per_lot
         lots = max(info.volume_min, round(lots / info.volume_step) * info.volume_step)
         lots = min(lots, info.volume_max)
+
+        # CHECK MARGE : reduire lots si depasse marge disponible (broker rejette retcode 10019)
+        order_type = mt5.ORDER_TYPE_BUY if direction == "bullish" else mt5.ORDER_TYPE_SELL
+        try:
+            margin_needed = mt5.order_calc_margin(order_type, bsym, lots, market_price)
+        except Exception:
+            margin_needed = None
+        acc = mt5.account_info()
+        free_margin = acc.margin_free if acc else 0
+        # Garde 20% buffer de marge libre (pour les autres positions)
+        max_margin = free_margin * 0.80
+        if margin_needed and margin_needed > max_margin:
+            ratio = max_margin / margin_needed
+            lots_reduced = max(info.volume_min, round(lots * ratio / info.volume_step) * info.volume_step)
+            if lots_reduced * risk_per_lot < risk_eur * 0.2:
+                log.warning(f"{asset} : marge insuffisante (need {margin_needed:.0f}, max {max_margin:.0f}) "
+                              f"= skip (risk effectif {lots_reduced*risk_per_lot:.2f} < 20% target)")
+                return False
+            log.info(f"{asset} : lot reduit {lots} -> {lots_reduced} (marge)")
+            lots = lots_reduced
         comment = f"V21-{direction[0].upper()} ml={proba:.2f}"
         result = mt5_exec.place_market_order(
             symbol=bsym, direction=direction, volume=lots,
