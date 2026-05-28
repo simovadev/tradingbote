@@ -60,6 +60,7 @@ from bot_v2.v21_inference import V21Predictor, REF_ASSETS, M15_LEN
 from bot_v2.v20_inference import V20Predictor  # shadow: affiche aussi proba V20 pour comparaison
 from bot_v2.push_dashboard import DashboardPusher
 from bot_v2.spread_logger import SpreadLogger
+from bot_v2.trade_audit_logger import TradeAuditLogger
 
 # Mapping nom V20 -> nom broker MT5 (meme que V20)
 BROKER_MAP = {
@@ -145,6 +146,7 @@ _boot_ts: pd.Timestamp | None = None
 _ref_cache: dict[str, pd.DataFrame] = {}  # cache des df_m15 ref par cycle
 _spread_logger = SpreadLogger()  # log spreads pour stats futures
 _cycle_spreads: dict[str, dict] = {}  # spread_pct + spread_points du tick courant par actif
+_audit = TradeAuditLogger()  # log forensic V21 (chaque OB detecte + decision)
 
 
 def broker_sym(asset: str) -> str:
@@ -229,10 +231,21 @@ def process_asset(asset: str, predictor: V21Predictor,
         if not obs_recent:
             return res
 
+        # Now reference pour mesurer retards
+        now_utc = pd.Timestamp.utcnow()
+        if now_utc.tz is None:
+            now_utc = now_utc.tz_localize("UTC")
+
         for ob in obs_recent:
             ob_key = (asset, ob.validation_ts.isoformat(), ob.direction)
             if ob_key in _seen_obs:
                 continue
+
+            # Audit timing
+            ob_age_s = (now_utc - ob.validation_ts).total_seconds() if hasattr(ob.validation_ts, 'tz_localize') else 0
+            ob_top = getattr(ob, "ob_high", None) or getattr(ob, "top", None)
+            ob_bottom = getattr(ob, "ob_low", None) or getattr(ob, "bottom", None)
+
             try:
                 r = evaluate_ob(
                     ob, df_m1, df_m15, df_d1,
@@ -240,8 +253,14 @@ def process_asset(asset: str, predictor: V21Predictor,
                 )
                 if r is None or r.verdict != "TRADE" or r.trade_setup is None:
                     reason = r.rejection_reason if r else "no_result"
-                    # PAS de _seen_obs.add : l'OB peut devenir valide plus tard (sweep, FVG, BOS)
-                    # On ne marque vu QUE quand V21 a vraiment evalue (proba calculee)
+                    # Audit log : OB rejete par pipeline ICT
+                    _audit.log(
+                        asset=asset, direction=ob.direction,
+                        ob_validation_ts=str(ob.validation_ts),
+                        ob_age_s=ob_age_s,
+                        ob_top=ob_top, ob_bottom=ob_bottom,
+                        decision="ICT_REJECT", ict_reason=str(reason)[:200],
+                    )
                     res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
                                            "direction": ob.direction, "reason": reason or "no_trade"})
                     continue
@@ -284,6 +303,29 @@ def process_asset(asset: str, predictor: V21Predictor,
                 _seen_obs.add(ob_key)
                 kz = killzone_at(ob.validation_ts) or "None"
                 setup = r.trade_setup
+
+                # Market price actuel pour calcul slippage entry vs OB
+                cur_tick = mt5.symbol_info_tick(broker_sym(asset))
+                cur_price = cur_tick.ask if cur_tick and ob.direction == "bullish" else (cur_tick.bid if cur_tick else None)
+                sp_info = _cycle_spreads.get(asset, {})
+
+                # Audit log : decision V21
+                _audit.log(
+                    asset=asset, direction=ob.direction,
+                    ob_validation_ts=str(ob.validation_ts),
+                    ob_age_s=ob_age_s,
+                    ob_top=ob_top, ob_bottom=ob_bottom,
+                    setup_entry=float(setup.entry_price), setup_sl=float(setup.stop_loss),
+                    setup_tp=float(setup.take_profit), setup_rr=float(setup.rr),
+                    market_price=cur_price,
+                    spread_pct=sp_info.get("spread_pct"),
+                    spread_points=sp_info.get("spread_points"),
+                    score=r.score or 0, killzone=kz,
+                    proba_v21=float(proba),
+                    proba_v20=float(proba_v20) if proba_v20 is not None else None,
+                    threshold=THRESHOLD,
+                    decision="V21_TRADE" if proba >= THRESHOLD else "V21_REJECT",
+                )
 
                 if proba >= THRESHOLD:
                     pusher.push_setup(
@@ -379,17 +421,40 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
             log.info(f"{asset} : lot reduit {lots} -> {lots_reduced} (marge)")
             lots = lots_reduced
         comment = f"V21-{direction[0].upper()} ml={proba:.2f}"
+        # Capture market price avant envoi pour calcul slippage
+        pre_tick = mt5.symbol_info_tick(bsym)
+        pre_price = pre_tick.ask if direction == "bullish" else (pre_tick.bid if pre_tick else market_price)
         result = mt5_exec.place_market_order(
             symbol=bsym, direction=direction, volume=lots,
             sl=sl, tp=tp, comment=comment, magic=BOT_MAGIC,
         )
         if result is None:
             log.warning(f"{asset} : ordre rejete par MT5")
+            _audit.log(
+                asset=asset, direction=direction,
+                ob_setup_entry=float(entry), ob_setup_sl=float(sl), ob_setup_tp=float(tp),
+                lots=float(lots), market_price=float(pre_price),
+                proba_v21=float(proba),
+                decision="MT5_REJECT", mt5_error="place_market_order returned None",
+            )
             return False
+        slippage = result["price"] - pre_price
         log.info(
             f"TRADE OK {asset} {direction} entry={result['price']:.5f} "
             f"SL={sl:.5f} TP={tp:.5f} vol={result['volume']:.2f} "
-            f"rr={rr:.2f} ml={proba:.3f}"
+            f"rr={rr:.2f} ml={proba:.3f} slippage={slippage:+.5f}"
+        )
+        _audit.log(
+            asset=asset, direction=direction, ticket=int(result["ticket"]),
+            ob_setup_entry=float(entry), ob_setup_sl=float(sl), ob_setup_tp=float(tp),
+            actual_entry=float(result["price"]),
+            pre_market_price=float(pre_price),
+            slippage_abs=float(slippage),
+            slippage_pct=float(slippage / pre_price * 100) if pre_price else 0,
+            lots=float(result["volume"]),
+            proba_v21=float(proba),
+            rr=float(rr), score=0,
+            decision="MT5_OK",
         )
         pusher.push_trade_executed(
             instrument=asset, ticket=result["ticket"],
@@ -544,12 +609,13 @@ def main():
                 _seen_obs.clear()
                 log.info(f"  _seen_obs cleanup (cycle {cycle_n})")
 
-            # Flush spreads logger toutes les 10 min
+            # Flush spreads + audit toutes les 10 cycles (~2.5 min en cycle 15s)
             if cycle_n % 10 == 0:
                 try:
                     _spread_logger.flush()
+                    _audit.flush()
                 except Exception as e:
-                    log.warning(f"spread_logger flush fail : {e}")
+                    log.warning(f"loggers flush fail : {e}")
 
             # Sleep jusqu'a la prochaine minute boundary
             # Cycle plus rapide : 15s au lieu de 60s (reduit le retard sur OB validation)
