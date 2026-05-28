@@ -474,12 +474,22 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         if tick is None:
             return {"status": "FAIL", "detail": "tick None"}
         market_price = tick.ask if direction == "bullish" else tick.bid
+
+        # FIX SL vs SPREAD : MT5 ferme un BUY au bid (bid touche SL = SL hit) et
+        # un SELL au ask (ask touche SL = SL hit). Le SL ICT est sur le prix de l'OB.
+        # Pour eviter d'etre stoppe avant que le prix touche reellement l'OB en bid/bull
+        # ou en ask/bear, on retire (BUY) / ajoute (SELL) le spread courant au SL.
+        spread_abs = tick.ask - tick.bid
+        sl_original = sl
+        if direction == "bullish":
+            sl = sl - spread_abs  # SL plus bas : tolerance le spread
+        else:
+            sl = sl + spread_abs  # SL plus haut : tolerance le spread
         sl_distance = abs(market_price - sl)
         if sl_distance <= 0:
             return {"status": "FAIL", "detail": "sl_distance <= 0"}
 
         # CHECK SPREAD : si spread > seuil actif -> setup ANNULE (trop cher a trader)
-        spread_abs = tick.ask - tick.bid
         mid = (tick.ask + tick.bid) / 2 if tick.bid > 0 else market_price
         spread_pct = (spread_abs / mid * 100) if mid > 0 else 0
         max_spread = MAX_SPREAD_PCT.get(asset, MAX_SPREAD_PCT_DEFAULT)
@@ -569,12 +579,17 @@ def execute_trade(mt5_exec: MT5Executor, asset: str, setup, proba: float,
         slippage = result["price"] - pre_price
         log.info(
             f"TRADE OK {asset} {direction} entry={result['price']:.5f} "
-            f"SL={sl:.5f} TP={tp:.5f} vol={result['volume']:.2f} "
+            f"SL={sl:.5f} (OB={sl_original:.5f} +spread {spread_abs:.5f}) "
+            f"TP={tp:.5f} vol={result['volume']:.2f} "
             f"rr={rr:.2f} ml={proba:.3f} slippage={slippage:+.5f}"
         )
         _audit.log(
             asset=asset, direction=direction, ticket=int(result["ticket"]),
-            ob_setup_entry=float(entry), ob_setup_sl=float(sl), ob_setup_tp=float(tp),
+            ob_setup_entry=float(entry),
+            ob_setup_sl=float(sl_original),  # SL ICT vrai (top/bottom OB)
+            sl_adjusted=float(sl),  # SL envoye a MT5 (= SL ICT +/- spread)
+            spread_at_send=float(spread_abs),
+            ob_setup_tp=float(tp),
             actual_entry=float(result["price"]),
             pre_market_price=float(pre_price),
             slippage_abs=float(slippage),
