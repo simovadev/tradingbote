@@ -208,7 +208,7 @@ def process_asset(asset: str, predictor: V21Predictor,
                 if r is None or r.verdict != "TRADE" or r.trade_setup is None:
                     reason = r.rejection_reason if r else "no_result"
                     _seen_obs.add(ob_key)
-                    res["rejets"].append({"asset": asset, "ts": ob.validation_ts,
+                    res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
                                            "direction": ob.direction, "reason": reason or "no_trade"})
                     continue
                 # V21 predict (avec cross-asset)
@@ -224,7 +224,7 @@ def process_asset(asset: str, predictor: V21Predictor,
                     proba = None
                 if proba is None:
                     _seen_obs.add(ob_key)
-                    res["rejets"].append({"asset": asset, "ts": ob.validation_ts,
+                    res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
                                            "direction": ob.direction, "reason": "V21_unavailable"})
                     continue
 
@@ -246,7 +246,7 @@ def process_asset(asset: str, predictor: V21Predictor,
                     res["setups"].append({"asset": asset, "proba": proba})
                 else:
                     res["rejets"].append({
-                        "asset": asset, "ts": ob.validation_ts,
+                        "asset": asset, "ts": ob.validation_ts.isoformat(),
                         "direction": ob.direction,
                         "reason": f"ml_below_thr_{proba:.3f}",
                         "proba": proba, "threshold": THRESHOLD,
