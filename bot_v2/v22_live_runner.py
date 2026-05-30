@@ -369,6 +369,80 @@ def update_daily_cb(mt5_exec: MT5Executor, now_utc: pd.Timestamp):
 
 
 # =====================================================================
+# Helper rejet enrichi
+# =====================================================================
+
+# Raisons humaines (au lieu des codes techniques)
+REASON_LABELS = {
+    "no_d1": "Pas de D1 disponible",
+    "d1_misaligned": "D1 (biais journalier) contre le sens du trade",
+    "no_h1": "Pas de H1 disponible",
+    "h1_too_recent": "H1 historique insuffisant",
+    "h1_misaligned": "H1 (tendance horaire) contre le sens du trade",
+    "no_pd": "Pas de PD daily (jour J-1)",
+    "pd_misaligned": "Prix hors zone discount/premium PD daily",
+    "hour_out_of_range": "Hors plage horaire de l'actif",
+    "h1_mom_low": "Momentum H1 trop faible",
+    "disp_low": "Displacement de l'OB trop faible",
+    "atr_too_high": "Volatilite trop elevee (ATR ratio)",
+    "tier_D_skip": "Tier D (qualite trop basse, on skip)",
+    "no_lot_size": "Capital insuffisant pour ouvrir min_lot",
+}
+
+
+def kz_from_hour(h_fr: float) -> str:
+    """Killzone selon heure FR."""
+    if 8 <= h_fr < 11: return "London"
+    if 11 <= h_fr < 14: return "Pre-NY"
+    if 14 <= h_fr < 17: return "NY AM"
+    if 17 <= h_fr < 21: return "NY PM"
+    if 5 <= h_fr < 8:  return "Asie tardive"
+    return "Hors KZ"
+
+
+def make_rejet(asset, ob, reason_code, details=None, tier=None, score=None,
+               cfg=None, entry=None, sl=None, tp=None, lots=None):
+    """Construit un rejet enrichi avec toutes les infos dispo."""
+    d = details or {}
+    rj = {
+        "instrument": asset,
+        "ts": ob.validation_ts.isoformat(),
+        "direction": ob.direction,
+        "reason": reason_code,
+        "reason_label": REASON_LABELS.get(reason_code, reason_code),
+    }
+    if "hour_fr" in d:
+        rj["hour_fr"] = round(d["hour_fr"], 2)
+        rj["killzone"] = kz_from_hour(d["hour_fr"])
+    if "h1_mom" in d:
+        rj["h1_mom_pct"] = round(d["h1_mom"], 3)
+    if "disp" in d:
+        rj["displacement_atr"] = round(d["disp"], 2)
+    if "atr_ratio" in d:
+        rj["atr_ratio"] = round(d["atr_ratio"], 2)
+    if tier is not None:
+        rj["tier"] = tier
+    if score is not None:
+        rj["score"] = score
+    if cfg is not None:
+        rj["cfg_h_min"] = cfg["h_min"]
+        rj["cfg_h_max"] = cfg["h_max"]
+        rj["cfg_h1m_min"] = cfg["h1m"]
+        rj["cfg_disp_min"] = cfg["disp"]
+        rj["cfg_atr_max"] = cfg["atr_max"]
+    # OB price levels (toujours dispo)
+    rj["ob_low"] = float(ob.ob_low)
+    rj["ob_high"] = float(ob.ob_high)
+    if entry is not None: rj["entry"] = float(entry)
+    if sl is not None: rj["sl"] = float(sl)
+    if tp is not None:
+        rj["tp"] = float(tp)
+        rj["rr"] = TP_RR
+    if lots is not None: rj["lots_calc"] = float(lots)
+    return rj
+
+
+# =====================================================================
 # Pipeline V22 par actif
 # =====================================================================
 
@@ -376,7 +450,7 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
     """Scan + applique config V22 + decision pour 1 actif."""
     t_asset = time.time()
     res = {"asset": asset, "n_obs": 0, "n_passes_rule": 0, "n_traded": 0,
-           "rejets": [], "errors": []}
+           "rejets": [], "errors": [], "candles_m5": None}
     cfg = PER_ASSET_CONFIG[asset]
 
     try:
@@ -390,6 +464,18 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
         if df_d1 is None or len(df_d1) < 5:
             res["errors"].append("D1_insufficient")
             return res
+
+        # On garde les 80 dernieres bougies M5 pour le dashboard (chart)
+        try:
+            tail = df_m5.tail(80)
+            res["candles_m5"] = [
+                {"time": int(ts.timestamp()),
+                 "open": float(row["open"]), "high": float(row["high"]),
+                 "low": float(row["low"]), "close": float(row["close"])}
+                for ts, row in tail.iterrows()
+            ]
+        except Exception:
+            res["candles_m5"] = None
 
         # Detect OBs sur M5 (filtre cons selon config actif)
         obs = find_obs_simple(df_m5, as_of_index=len(df_m5) - 1, min_consecutive=cfg["cons"])
@@ -414,26 +500,21 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
             # Filtre USER (D1+H1+PD)
             ok, details = passes_user_rule(df_m5, df_h1, df_d1, ob)
             if not ok:
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": details["reason"]})
+                res["rejets"].append(make_rejet(asset, ob, details["reason"], details, cfg=cfg))
                 continue
 
             # Filtres config actif (hour, h1_mom, disp, atr_ratio)
             if not (cfg["h_min"] <= details["hour_fr"] < cfg["h_max"]):
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": "hour_out_of_range"})
+                res["rejets"].append(make_rejet(asset, ob, "hour_out_of_range", details, cfg=cfg))
                 continue
             if details["h1_mom"] < cfg["h1m"]:
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": "h1_mom_low"})
+                res["rejets"].append(make_rejet(asset, ob, "h1_mom_low", details, cfg=cfg))
                 continue
             if details["disp"] < cfg["disp"]:
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": "disp_low"})
+                res["rejets"].append(make_rejet(asset, ob, "disp_low", details, cfg=cfg))
                 continue
             if cfg["atr_max"] is not None and details["atr_ratio"] >= cfg["atr_max"]:
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": "atr_too_high"})
+                res["rejets"].append(make_rejet(asset, ob, "atr_too_high", details, cfg=cfg))
                 continue
 
             res["n_passes_rule"] += 1
@@ -458,18 +539,20 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
 
             # Tier D = skip
             if tier == "D":
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": "tier_D_skip",
-                                       "tier": tier, "score": score})
+                res["rejets"].append(make_rejet(asset, ob, "tier_D_skip", details,
+                                                 tier=tier, score=score, cfg=cfg,
+                                                 entry=entry, sl=sl, tp=tp))
                 continue
 
             # Garde-fous
             now_utc = pd.Timestamp.now(tz="UTC")
             ok_guard, guard_reason = check_guards(mt5_exec, asset, now_utc)
             if not ok_guard:
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": f"guard_{guard_reason}",
-                                       "tier": tier})
+                rj = make_rejet(asset, ob, f"guard_{guard_reason}", details,
+                                 tier=tier, score=score, cfg=cfg,
+                                 entry=entry, sl=sl, tp=tp)
+                rj["reason_label"] = f"Garde-fou : {guard_reason}"
+                res["rejets"].append(rj)
                 continue
 
             # Calcul lots
@@ -479,9 +562,9 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
             risk_pts = abs(entry - sl)
             lots = calc_lots(asset, risk_amount, risk_pts)
             if lots is None:
-                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
-                                       "direction": ob.direction, "reason": "no_lot_size",
-                                       "tier": tier})
+                res["rejets"].append(make_rejet(asset, ob, "no_lot_size", details,
+                                                 tier=tier, score=score, cfg=cfg,
+                                                 entry=entry, sl=sl, tp=tp))
                 continue
 
             # SPLIT en 2 ordres (Vantage ne supporte pas la fermeture partielle) :
@@ -813,6 +896,7 @@ def main():
             # Process tous les actifs sequentiellement (22 actifs)
             n_obs_total = 0; n_passes_total = 0; n_traded_total = 0
             all_rejets = []; all_errors = []
+            candles_by_asset: dict[str, list] = {}
             for asset in ASSETS:
                 try:
                     r = process_asset(asset, mt5_exec, pusher) if pusher else process_asset(asset, mt5_exec, _NoopPusher())
@@ -822,6 +906,8 @@ def main():
                     all_rejets.extend(r["rejets"])
                     all_errors.extend(r["errors"])
                     _last_latencies[asset] = r.get("latency_ms", 0)
+                    if r.get("rejets") and r.get("candles_m5"):
+                        candles_by_asset[asset] = r["candles_m5"]
                 except Exception as e:
                     log.error(f"  asset {asset} crash : {type(e).__name__}: {e}")
 
@@ -851,7 +937,11 @@ def main():
                         positions_open=n_open,
                     )
                     if all_rejets:
-                        pusher.push_rejected_batch(all_rejets[:50])
+                        # Limite a 50 rejets, mais inclut les candles pour le graphique
+                        pusher.push_rejected_batch(
+                            all_rejets[:50],
+                            candles_by_asset=candles_by_asset,
+                        )
                     pusher.push_cycle(
                         actifs_scanned=len(ASSETS),
                         total_s=elapsed, fetch_s=0.0, compute_s=elapsed,
