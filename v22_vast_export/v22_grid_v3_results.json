@@ -1,0 +1,3404 @@
+{
+  "top": [
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2050,
+      "wr": 59.56097560975609,
+      "exp_R": 0.46024391055107117,
+      "total_R": 943.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2050,
+      "wr": 59.56097560975609,
+      "exp_R": 0.46024391055107117,
+      "total_R": 943.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2050,
+      "wr": 59.56097560975609,
+      "exp_R": 0.46024391055107117,
+      "total_R": 943.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2071,
+      "wr": 59.68131337518107,
+      "exp_R": 0.45968130230903625,
+      "total_R": 952.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2026,
+      "wr": 59.427443237907205,
+      "exp_R": 0.4590325653553009,
+      "total_R": 930.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2026,
+      "wr": 59.427443237907205,
+      "exp_R": 0.4590325653553009,
+      "total_R": 930.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2026,
+      "wr": 59.427443237907205,
+      "exp_R": 0.4590325653553009,
+      "total_R": 930.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2072,
+      "wr": 59.65250965250966,
+      "exp_R": 0.4589768350124359,
+      "total_R": 951.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2072,
+      "wr": 59.65250965250966,
+      "exp_R": 0.4589768350124359,
+      "total_R": 951.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2037,
+      "wr": 59.499263622974965,
+      "exp_R": 0.4580264985561371,
+      "total_R": 933.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1826,
+      "wr": 58.98138006571742,
+      "exp_R": 0.4575574994087219,
+      "total_R": 835.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2058,
+      "wr": 59.62099125364432,
+      "exp_R": 0.4574829936027527,
+      "total_R": 941.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1847,
+      "wr": 59.12290200324851,
+      "exp_R": 0.45695722103118896,
+      "total_R": 844.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2013,
+      "wr": 59.36413313462494,
+      "exp_R": 0.45678091049194336,
+      "total_R": 919.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1802,
+      "wr": 58.82352941176471,
+      "exp_R": 0.4561598300933838,
+      "total_R": 822.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2396,
+      "wr": 60.60100166944908,
+      "exp_R": 0.4545074999332428,
+      "total_R": 1089.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2360,
+      "wr": 60.46610169491525,
+      "exp_R": 0.45402541756629944,
+      "total_R": 1071.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1979,
+      "wr": 59.01970692268823,
+      "exp_R": 0.45376452803611755,
+      "total_R": 898.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1979,
+      "wr": 59.01970692268823,
+      "exp_R": 0.45376452803611755,
+      "total_R": 898.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1979,
+      "wr": 59.01970692268823,
+      "exp_R": 0.45376452803611755,
+      "total_R": 898.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1759,
+      "wr": 58.44229675952246,
+      "exp_R": 0.45196133852005005,
+      "total_R": 795.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1967,
+      "wr": 58.97305541433655,
+      "exp_R": 0.4519572854042053,
+      "total_R": 889.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2433,
+      "wr": 60.583641594739,
+      "exp_R": 0.4500616490840912,
+      "total_R": 1095.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2700,
+      "wr": 60.88888888888889,
+      "exp_R": 0.44962963461875916,
+      "total_R": 1214.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2700,
+      "wr": 60.88888888888889,
+      "exp_R": 0.44962963461875916,
+      "total_R": 1214.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2700,
+      "wr": 60.88888888888889,
+      "exp_R": 0.44962963461875916,
+      "total_R": 1214.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1541,
+      "wr": 57.94938351719663,
+      "exp_R": 0.44938352704048157,
+      "total_R": 692.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1541,
+      "wr": 57.94938351719663,
+      "exp_R": 0.44938352704048157,
+      "total_R": 692.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1541,
+      "wr": 57.94938351719663,
+      "exp_R": 0.44938352704048157,
+      "total_R": 692.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2664,
+      "wr": 60.773273273273276,
+      "exp_R": 0.4491366446018219,
+      "total_R": 1196.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2664,
+      "wr": 60.773273273273276,
+      "exp_R": 0.4491366446018219,
+      "total_R": 1196.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2664,
+      "wr": 60.773273273273276,
+      "exp_R": 0.4491366446018219,
+      "total_R": 1196.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1523,
+      "wr": 57.84635587655942,
+      "exp_R": 0.44878530502319336,
+      "total_R": 683.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1523,
+      "wr": 57.84635587655942,
+      "exp_R": 0.44878530502319336,
+      "total_R": 683.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1523,
+      "wr": 57.84635587655942,
+      "exp_R": 0.44878530502319336,
+      "total_R": 683.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1933,
+      "wr": 58.76875323331608,
+      "exp_R": 0.448525607585907,
+      "total_R": 867.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1933,
+      "wr": 58.76875323331608,
+      "exp_R": 0.448525607585907,
+      "total_R": 867.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1933,
+      "wr": 58.76875323331608,
+      "exp_R": 0.448525607585907,
+      "total_R": 867.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1555,
+      "wr": 58.0064308681672,
+      "exp_R": 0.4482315182685852,
+      "total_R": 697.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2682,
+      "wr": 60.85011185682326,
+      "exp_R": 0.44817301630973816,
+      "total_R": 1202.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2302,
+      "wr": 60.03475238922677,
+      "exp_R": 0.4478714168071747,
+      "total_R": 1031.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2646,
+      "wr": 60.73318216175358,
+      "exp_R": 0.4476568400859833,
+      "total_R": 1184.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1556,
+      "wr": 57.969151670951156,
+      "exp_R": 0.4473007619380951,
+      "total_R": 696.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1556,
+      "wr": 57.969151670951156,
+      "exp_R": 0.4473007619380951,
+      "total_R": 696.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1922,
+      "wr": 58.740894901144635,
+      "exp_R": 0.44719043374061584,
+      "total_R": 859.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1714,
+      "wr": 58.16802800466745,
+      "exp_R": 0.44661611318588257,
+      "total_R": 765.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 18
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1530,
+      "wr": 57.84313725490197,
+      "exp_R": 0.44607841968536377,
+      "total_R": 682.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2738,
+      "wr": 60.883856829802774,
+      "exp_R": 0.44576331973075867,
+      "total_R": 1220.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2237,
+      "wr": 59.812248547161374,
+      "exp_R": 0.4456861913204193,
+      "total_R": 997.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1512,
+      "wr": 57.738095238095234,
+      "exp_R": 0.4454365074634552,
+      "total_R": 673.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2739,
+      "wr": 60.861628331507845,
+      "exp_R": 0.4452354907989502,
+      "total_R": 1219.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2739,
+      "wr": 60.861628331507845,
+      "exp_R": 0.4452354907989502,
+      "total_R": 1219.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2041,
+      "wr": 58.94169524742773,
+      "exp_R": 0.44512492418289185,
+      "total_R": 908.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2041,
+      "wr": 58.94169524742773,
+      "exp_R": 0.44512492418289185,
+      "total_R": 908.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2041,
+      "wr": 58.94169524742773,
+      "exp_R": 0.44512492418289185,
+      "total_R": 908.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1544,
+      "wr": 57.901554404145074,
+      "exp_R": 0.4449481964111328,
+      "total_R": 687.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2062,
+      "wr": 59.06886517943744,
+      "exp_R": 0.44471386075019836,
+      "total_R": 917.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2720,
+      "wr": 60.845588235294116,
+      "exp_R": 0.44430145621299744,
+      "total_R": 1208.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2063,
+      "wr": 59.04023267086767,
+      "exp_R": 0.4440135657787323,
+      "total_R": 916.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2063,
+      "wr": 59.04023267086767,
+      "exp_R": 0.4440135657787323,
+      "total_R": 916.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2017,
+      "wr": 58.80019831432821,
+      "exp_R": 0.4437282979488373,
+      "total_R": 895.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2017,
+      "wr": 58.80019831432821,
+      "exp_R": 0.4437282979488373,
+      "total_R": 895.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2017,
+      "wr": 58.80019831432821,
+      "exp_R": 0.4437282979488373,
+      "total_R": 895.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1489,
+      "wr": 57.421087978509064,
+      "exp_R": 0.4435862898826599,
+      "total_R": 660.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1489,
+      "wr": 57.421087978509064,
+      "exp_R": 0.4435862898826599,
+      "total_R": 660.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1489,
+      "wr": 57.421087978509064,
+      "exp_R": 0.4435862898826599,
+      "total_R": 660.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2028,
+      "wr": 58.875739644970416,
+      "exp_R": 0.4428007900714874,
+      "total_R": 898.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2049,
+      "wr": 59.004392386530014,
+      "exp_R": 0.442410945892334,
+      "total_R": 906.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2600,
+      "wr": 60.30769230769231,
+      "exp_R": 0.4419230818748474,
+      "total_R": 1149.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2600,
+      "wr": 60.30769230769231,
+      "exp_R": 0.4419230818748474,
+      "total_R": 1149.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2600,
+      "wr": 60.30769230769231,
+      "exp_R": 0.4419230818748474,
+      "total_R": 1149.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2321,
+      "wr": 59.15553640672124,
+      "exp_R": 0.4414045810699463,
+      "total_R": 1024.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2321,
+      "wr": 59.15553640672124,
+      "exp_R": 0.4414045810699463,
+      "total_R": 1024.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2321,
+      "wr": 59.15553640672124,
+      "exp_R": 0.4414045810699463,
+      "total_R": 1024.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2004,
+      "wr": 58.73253493013972,
+      "exp_R": 0.4413672685623169,
+      "total_R": 884.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2342,
+      "wr": 59.26558497011102,
+      "exp_R": 0.44107601046562195,
+      "total_R": 1033.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1479,
+      "wr": 57.33603786342123,
+      "exp_R": 0.44083839654922485,
+      "total_R": 652.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2583,
+      "wr": 60.278745644599304,
+      "exp_R": 0.4407665431499481,
+      "total_R": 1138.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1455,
+      "wr": 57.182130584192436,
+      "exp_R": 0.4405498206615448,
+      "total_R": 641.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1455,
+      "wr": 57.182130584192436,
+      "exp_R": 0.4405498206615448,
+      "total_R": 641.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1455,
+      "wr": 57.182130584192436,
+      "exp_R": 0.4405498206615448,
+      "total_R": 641.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2343,
+      "wr": 59.240290226205715,
+      "exp_R": 0.4404609501361847,
+      "total_R": 1032.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2343,
+      "wr": 59.240290226205715,
+      "exp_R": 0.4404609501361847,
+      "total_R": 1032.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2297,
+      "wr": 59.03352198519809,
+      "exp_R": 0.4401393234729767,
+      "total_R": 1011.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2297,
+      "wr": 59.03352198519809,
+      "exp_R": 0.4401393234729767,
+      "total_R": 1011.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2297,
+      "wr": 59.03352198519809,
+      "exp_R": 0.4401393234729767,
+      "total_R": 1011.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1818,
+      "wr": 58.25082508250825,
+      "exp_R": 0.4397689700126648,
+      "total_R": 799.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1535,
+      "wr": 57.45928338762215,
+      "exp_R": 0.4397394061088562,
+      "total_R": 675.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1535,
+      "wr": 57.45928338762215,
+      "exp_R": 0.4397394061088562,
+      "total_R": 675.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1535,
+      "wr": 57.45928338762215,
+      "exp_R": 0.4397394061088562,
+      "total_R": 675.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2534,
+      "wr": 60.1026045777427,
+      "exp_R": 0.4394238293170929,
+      "total_R": 1113.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2534,
+      "wr": 60.1026045777427,
+      "exp_R": 0.4394238293170929,
+      "total_R": 1113.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2534,
+      "wr": 60.1026045777427,
+      "exp_R": 0.4394238293170929,
+      "total_R": 1113.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1839,
+      "wr": 58.40130505709625,
+      "exp_R": 0.43936923146247864,
+      "total_R": 808.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2039,
+      "wr": 58.60716037273173,
+      "exp_R": 0.43918588757514954,
+      "total_R": 895.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 22
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1517,
+      "wr": 57.350032959789054,
+      "exp_R": 0.4390243887901306,
+      "total_R": 666.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1517,
+      "wr": 57.350032959789054,
+      "exp_R": 0.4390243887901306,
+      "total_R": 666.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1517,
+      "wr": 57.350032959789054,
+      "exp_R": 0.4390243887901306,
+      "total_R": 666.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2060,
+      "wr": 58.7378640776699,
+      "exp_R": 0.4388349652290344,
+      "total_R": 904.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 22
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1549,
+      "wr": 57.52098127824403,
+      "exp_R": 0.4386700987815857,
+      "total_R": 679.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2518,
+      "wr": 60.08737092930898,
+      "exp_R": 0.4386417865753174,
+      "total_R": 1104.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1446,
+      "wr": 57.12309820193637,
+      "exp_R": 0.4384509027004242,
+      "total_R": 634.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1794,
+      "wr": 58.082497212932,
+      "exp_R": 0.4381271004676819,
+      "total_R": 786.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1970,
+      "wr": 58.32487309644671,
+      "exp_R": 0.437817245721817,
+      "total_R": 862.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1970,
+      "wr": 58.32487309644671,
+      "exp_R": 0.437817245721817,
+      "total_R": 862.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1970,
+      "wr": 58.32487309644671,
+      "exp_R": 0.437817245721817,
+      "total_R": 862.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1550,
+      "wr": 57.483870967741936,
+      "exp_R": 0.4377419352531433,
+      "total_R": 678.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1550,
+      "wr": 57.483870967741936,
+      "exp_R": 0.4377419352531433,
+      "total_R": 678.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2015,
+      "wr": 58.46153846153847,
+      "exp_R": 0.43771710991859436,
+      "total_R": 882.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 22
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2303,
+      "wr": 59.00998697351281,
+      "exp_R": 0.4370386600494385,
+      "total_R": 1006.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2028,
+      "wr": 58.67850098619329,
+      "exp_R": 0.4368836283683777,
+      "total_R": 886.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2028,
+      "wr": 58.67850098619329,
+      "exp_R": 0.4368836283683777,
+      "total_R": 886.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2028,
+      "wr": 58.67850098619329,
+      "exp_R": 0.4368836283683777,
+      "total_R": 886.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1733,
+      "wr": 57.93421811886902,
+      "exp_R": 0.4368147850036621,
+      "total_R": 757.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1733,
+      "wr": 57.93421811886902,
+      "exp_R": 0.4368147850036621,
+      "total_R": 757.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1733,
+      "wr": 57.93421811886902,
+      "exp_R": 0.4368147850036621,
+      "total_R": 757.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2324,
+      "wr": 59.12220309810671,
+      "exp_R": 0.4367469847202301,
+      "total_R": 1015.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1524,
+      "wr": 57.3490813648294,
+      "exp_R": 0.4363517165184021,
+      "total_R": 665.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1715,
+      "wr": 57.84256559766764,
+      "exp_R": 0.4361515939235687,
+      "total_R": 748.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1715,
+      "wr": 57.84256559766764,
+      "exp_R": 0.4361515939235687,
+      "total_R": 748.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1715,
+      "wr": 57.84256559766764,
+      "exp_R": 0.4361515939235687,
+      "total_R": 748.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2004,
+      "wr": 58.58283433133733,
+      "exp_R": 0.43612775206565857,
+      "total_R": 874.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2004,
+      "wr": 58.58283433133733,
+      "exp_R": 0.43612775206565857,
+      "total_R": 874.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2004,
+      "wr": 58.58283433133733,
+      "exp_R": 0.43612775206565857,
+      "total_R": 874.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2049,
+      "wr": 58.80917520741825,
+      "exp_R": 0.4360663592815399,
+      "total_R": 893.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1958,
+      "wr": 58.27374872318693,
+      "exp_R": 0.43590399622917175,
+      "total_R": 853.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1747,
+      "wr": 57.98511734401832,
+      "exp_R": 0.4358901083469391,
+      "total_R": 761.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2279,
+      "wr": 58.88547608600263,
+      "exp_R": 0.4357174336910248,
+      "total_R": 993.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1506,
+      "wr": 57.23771580345286,
+      "exp_R": 0.4355909824371338,
+      "total_R": 656.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2050,
+      "wr": 58.78048780487804,
+      "exp_R": 0.43536585569381714,
+      "total_R": 892.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2050,
+      "wr": 58.78048780487804,
+      "exp_R": 0.43536585569381714,
+      "total_R": 892.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1538,
+      "wr": 57.41222366710013,
+      "exp_R": 0.4353055953979492,
+      "total_R": 669.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2250,
+      "wr": 58.666666666666664,
+      "exp_R": 0.4351111054420471,
+      "total_R": 979.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2250,
+      "wr": 58.666666666666664,
+      "exp_R": 0.4351111054420471,
+      "total_R": 979.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2250,
+      "wr": 58.666666666666664,
+      "exp_R": 0.4351111054420471,
+      "total_R": 979.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1748,
+      "wr": 57.95194508009154,
+      "exp_R": 0.43506863713264465,
+      "total_R": 760.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1748,
+      "wr": 57.95194508009154,
+      "exp_R": 0.43506863713264465,
+      "total_R": 760.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2702,
+      "wr": 60.14063656550703,
+      "exp_R": 0.43504810333251953,
+      "total_R": 1175.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 17,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2085,
+      "wr": 59.76019184652278,
+      "exp_R": 0.43501198291778564,
+      "total_R": 907.0,
+      "dd_R": 6.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2387,
+      "wr": 59.82404692082112,
+      "exp_R": 0.43485546112060547,
+      "total_R": 1038.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2015,
+      "wr": 58.61042183622829,
+      "exp_R": 0.4344913065433502,
+      "total_R": 875.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2666,
+      "wr": 60.01500375093774,
+      "exp_R": 0.4343585968017578,
+      "total_R": 1158.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2351,
+      "wr": 59.6767333049766,
+      "exp_R": 0.4340706169605255,
+      "total_R": 1020.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1991,
+      "wr": 58.513309894525364,
+      "exp_R": 0.43370166420936584,
+      "total_R": 863.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 2036,
+      "wr": 58.7426326129666,
+      "exp_R": 0.433693528175354,
+      "total_R": 883.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1483,
+      "wr": 56.91166554281861,
+      "exp_R": 0.43358057737350464,
+      "total_R": 643.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1483,
+      "wr": 56.91166554281861,
+      "exp_R": 0.43358057737350464,
+      "total_R": 643.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1483,
+      "wr": 56.91166554281861,
+      "exp_R": 0.43358057737350464,
+      "total_R": 643.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1972,
+      "wr": 58.113590263691684,
+      "exp_R": 0.4335699677467346,
+      "total_R": 855.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 22
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2690,
+      "wr": 60.260223048327134,
+      "exp_R": 0.4332713782787323,
+      "total_R": 1165.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2690,
+      "wr": 60.260223048327134,
+      "exp_R": 0.4332713782787323,
+      "total_R": 1165.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2690,
+      "wr": 60.260223048327134,
+      "exp_R": 0.4332713782787323,
+      "total_R": 1165.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1751,
+      "wr": 57.62421473443746,
+      "exp_R": 0.4331810474395752,
+      "total_R": 758.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 19
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2654,
+      "wr": 60.13564431047476,
+      "exp_R": 0.4325546324253082,
+      "total_R": 1148.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2654,
+      "wr": 60.13564431047476,
+      "exp_R": 0.4325546324253082,
+      "total_R": 1148.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2654,
+      "wr": 60.13564431047476,
+      "exp_R": 0.4325546324253082,
+      "total_R": 1148.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 17,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1804,
+      "wr": 58.48115299334812,
+      "exp_R": 0.43209534883499146,
+      "total_R": 779.5,
+      "dd_R": 6.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 17,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1804,
+      "wr": 58.48115299334812,
+      "exp_R": 0.43209534883499146,
+      "total_R": 779.5,
+      "dd_R": 6.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 17,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1804,
+      "wr": 58.48115299334812,
+      "exp_R": 0.43209534883499146,
+      "total_R": 779.5,
+      "dd_R": 6.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2672,
+      "wr": 60.217065868263475,
+      "exp_R": 0.43169909715652466,
+      "total_R": 1153.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1508,
+      "wr": 57.161803713527846,
+      "exp_R": 0.4316976070404053,
+      "total_R": 651.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1508,
+      "wr": 57.161803713527846,
+      "exp_R": 0.4316976070404053,
+      "total_R": 651.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1508,
+      "wr": 57.161803713527846,
+      "exp_R": 0.4316976070404053,
+      "total_R": 651.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1526,
+      "wr": 57.20838794233289,
+      "exp_R": 0.4315203130245209,
+      "total_R": 658.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1526,
+      "wr": 57.20838794233289,
+      "exp_R": 0.4315203130245209,
+      "total_R": 658.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1526,
+      "wr": 57.20838794233289,
+      "exp_R": 0.4315203130245209,
+      "total_R": 658.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1925,
+      "wr": 58.02597402597402,
+      "exp_R": 0.43142858147621155,
+      "total_R": 830.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1925,
+      "wr": 58.02597402597402,
+      "exp_R": 0.43142858147621155,
+      "total_R": 830.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1925,
+      "wr": 58.02597402597402,
+      "exp_R": 0.43142858147621155,
+      "total_R": 830.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2739,
+      "wr": 60.13143483023001,
+      "exp_R": 0.4313618242740631,
+      "total_R": 1181.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1718,
+      "wr": 57.741559953434226,
+      "exp_R": 0.43131548166275024,
+      "total_R": 741.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1681,
+      "wr": 57.46579417013682,
+      "exp_R": 0.4312908947467804,
+      "total_R": 725.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1681,
+      "wr": 57.46579417013682,
+      "exp_R": 0.4312908947467804,
+      "total_R": 725.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1681,
+      "wr": 57.46579417013682,
+      "exp_R": 0.4312908947467804,
+      "total_R": 725.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 1.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2423,
+      "wr": 59.84316962443253,
+      "exp_R": 0.43128353357315063,
+      "total_R": 1045.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2233,
+      "wr": 58.53112404836543,
+      "exp_R": 0.43103447556495667,
+      "total_R": 962.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2636,
+      "wr": 60.09104704097117,
+      "exp_R": 0.43095600605010986,
+      "total_R": 1136.0,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 20,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1473,
+      "wr": 56.82281059063137,
+      "exp_R": 0.43075355887413025,
+      "total_R": 634.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1700,
+      "wr": 57.647058823529406,
+      "exp_R": 0.4305882453918457,
+      "total_R": 732.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 17,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1793,
+      "wr": 58.44952593418851,
+      "exp_R": 0.4305633008480072,
+      "total_R": 772.0,
+      "dd_R": 6.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 0.7,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 4573,
+      "wr": 59.28274655587143,
+      "exp_R": 0.43046140670776367,
+      "total_R": 1968.5,
+      "dd_R": 8.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 2
+      },
+      "n": 4392,
+      "wr": 57.62750455373406,
+      "exp_R": 0.4304417073726654,
+      "total_R": 1890.5,
+      "dd_R": 9.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 2
+      },
+      "n": 4392,
+      "wr": 57.62750455373406,
+      "exp_R": 0.4304417073726654,
+      "total_R": 1890.5,
+      "dd_R": 9.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 22,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 2
+      },
+      "n": 4392,
+      "wr": 57.62750455373406,
+      "exp_R": 0.4304417073726654,
+      "total_R": 1890.5,
+      "dd_R": 9.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.0,
+        "hour_min": 8,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 1732,
+      "wr": 57.7944572748268,
+      "exp_R": 0.4304272532463074,
+      "total_R": 745.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 17
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1449,
+      "wr": 56.65976535541753,
+      "exp_R": 0.43029674887657166,
+      "total_R": 623.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1449,
+      "wr": 56.65976535541753,
+      "exp_R": 0.43029674887657166,
+      "total_R": 623.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1449,
+      "wr": 56.65976535541753,
+      "exp_R": 0.43029674887657166,
+      "total_R": 623.5,
+      "dd_R": 7.0,
+      "n_profitable_assets": 15
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 0.7,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 4575,
+      "wr": 59.256830601092894,
+      "exp_R": 0.43027323484420776,
+      "total_R": 1968.5,
+      "dd_R": 8.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 0.7,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 4575,
+      "wr": 59.256830601092894,
+      "exp_R": 0.43027323484420776,
+      "total_R": 1968.5,
+      "dd_R": 8.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 8,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2204,
+      "wr": 58.43920145190563,
+      "exp_R": 0.4301270544528961,
+      "total_R": 948.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 8,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2204,
+      "wr": 58.43920145190563,
+      "exp_R": 0.4301270544528961,
+      "total_R": 948.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 8,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 2204,
+      "wr": 58.43920145190563,
+      "exp_R": 0.4301270544528961,
+      "total_R": 948.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 23
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 19,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 1914,
+      "wr": 57.993730407523515,
+      "exp_R": 0.4299895465373993,
+      "total_R": 823.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 20
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": null,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 2
+      },
+      "n": 4347,
+      "wr": 57.55693581780539,
+      "exp_R": 0.4299516975879669,
+      "total_R": 1869.0,
+      "dd_R": 9.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 2
+      },
+      "n": 4347,
+      "wr": 57.55693581780539,
+      "exp_R": 0.4299516975879669,
+      "total_R": 1869.0,
+      "dd_R": 9.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 3.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.2,
+        "min_consecutive": 2
+      },
+      "n": 4347,
+      "wr": 57.55693581780539,
+      "exp_R": 0.4299516975879669,
+      "total_R": 1869.0,
+      "dd_R": 9.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.3,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.1,
+        "min_consecutive": 3
+      },
+      "n": 1540,
+      "wr": 57.27272727272727,
+      "exp_R": 0.4298701286315918,
+      "total_R": 662.0,
+      "dd_R": 7.0,
+      "n_profitable_assets": 16
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.2,
+        "atr_ratio_max": 2.0,
+        "hour_min": 9,
+        "hour_max": 21,
+        "displacement_min": 0.7,
+        "sl_buffer": 0.2,
+        "min_consecutive": 3
+      },
+      "n": 4532,
+      "wr": 59.267431597528685,
+      "exp_R": 0.4296116530895233,
+      "total_R": 1947.0,
+      "dd_R": 8.0,
+      "n_profitable_assets": 25
+    },
+    {
+      "combo": {
+        "h1_mom_min": 0.1,
+        "atr_ratio_max": 2.5,
+        "hour_min": 9,
+        "hour_max": 24,
+        "displacement_min": 1.0,
+        "sl_buffer": 0.15,
+        "min_consecutive": 3
+      },
+      "n": 2727,
+      "wr": 60.24935826916025,
+      "exp_R": 0.42959296703338623,
+      "total_R": 1171.5,
+      "dd_R": 6.5,
+      "n_profitable_assets": 25
+    }
+  ]
+}

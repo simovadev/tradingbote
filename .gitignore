@@ -74,3 +74,13 @@ ml_partial_random_*/
 # Bilans/MD perso (optionnel - on garde les BILAN_*)
 # CLAUDE.md
 
+
+# V22 - cache + HTML + exports (regenerables, lourds)
+v22_validation_cache/
+v22_validation_results/
+v22_html/
+v22_vast_export/*.log
+v22_simu_2026_results.json
+v22_features_*.csv
+v22_dataset_*.npz
+v22_live.log
