@@ -564,10 +564,13 @@ def main():
     log.info(f"_boot_ts : {_boot_ts}")
 
     # Init dashboard
+    pusher = None
     try:
-        pusher = DashboardPusher()
+        dash_url = os.environ.get("DASHBOARD_URL")
+        session_id = f"v22_{int(time.time())}"
+        pusher = DashboardPusher(url=dash_url, session_id=session_id)
         pusher.push_start("V22 live runner demo")
-        log.info("DashboardPusher initialise")
+        log.info(f"DashboardPusher initialise : url={dash_url} session={session_id}")
     except Exception as e:
         log.warning(f"Dashboard push fail : {e}")
         pusher = None
