@@ -619,6 +619,8 @@ def main():
             if _cycle_count % 30 == 0:
                 cleanup_seen_obs()
 
+            elapsed = time.time() - t_cycle
+
             # Push stats
             balance = mt5_exec.get_balance()
             equity = mt5_exec.get_equity()
@@ -626,19 +628,21 @@ def main():
             try:
                 if pusher:
                     pusher.push_stats(
+                        total=0, wins=0, losses=0, wr_pct=0.0,
+                        pnl_total=balance - (_initial_balance or balance),
                         balance=balance, equity=equity,
-                        n_open_positions=n_open,
-                        n_cycle=_cycle_count,
+                        positions_open=n_open,
                     )
                     if all_rejets:
                         pusher.push_rejected_batch(all_rejets[:50])
-                    pusher.push_cycle(n_obs=n_obs_total, n_passes=n_passes_total,
-                                       n_traded=n_traded_total, n_open=n_open,
-                                       balance=balance)
+                    pusher.push_cycle(
+                        actifs_scanned=len(ASSETS),
+                        total_s=elapsed, fetch_s=0.0, compute_s=elapsed,
+                        latencies={},
+                    )
             except Exception as e:
                 log.warning(f"push stats fail : {e}")
 
-            elapsed = time.time() - t_cycle
             log.info(f"  cycle #{_cycle_count:5d} | OBs={n_obs_total:>4} pass_rule={n_passes_total:>3} "
                       f"trades={n_traded_total:>2} | balance={balance:.2f} eq={equity:.2f} open={n_open} "
                       f"| {elapsed:.1f}s ({len(all_errors)} errors)")
