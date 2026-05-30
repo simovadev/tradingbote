@@ -414,25 +414,25 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
             # Filtre USER (D1+H1+PD)
             ok, details = passes_user_rule(df_m5, df_h1, df_d1, ob)
             if not ok:
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": details["reason"]})
                 continue
 
             # Filtres config actif (hour, h1_mom, disp, atr_ratio)
             if not (cfg["h_min"] <= details["hour_fr"] < cfg["h_max"]):
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": "hour_out_of_range"})
                 continue
             if details["h1_mom"] < cfg["h1m"]:
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": "h1_mom_low"})
                 continue
             if details["disp"] < cfg["disp"]:
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": "disp_low"})
                 continue
             if cfg["atr_max"] is not None and details["atr_ratio"] >= cfg["atr_max"]:
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": "atr_too_high"})
                 continue
 
@@ -458,7 +458,7 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
 
             # Tier D = skip
             if tier == "D":
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": "tier_D_skip",
                                        "tier": tier, "score": score})
                 continue
@@ -467,7 +467,7 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
             now_utc = pd.Timestamp.now(tz="UTC")
             ok_guard, guard_reason = check_guards(mt5_exec, asset, now_utc)
             if not ok_guard:
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": f"guard_{guard_reason}",
                                        "tier": tier})
                 continue
@@ -479,7 +479,7 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
             risk_pts = abs(entry - sl)
             lots = calc_lots(asset, risk_amount, risk_pts)
             if lots is None:
-                res["rejets"].append({"asset": asset, "ts": ob.validation_ts.isoformat(),
+                res["rejets"].append({"instrument": asset, "ts": ob.validation_ts.isoformat(),
                                        "direction": ob.direction, "reason": "no_lot_size",
                                        "tier": tier})
                 continue
