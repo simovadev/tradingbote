@@ -1,7 +1,10 @@
-"""v22_test_trade_btc.py - Test rapide d'un trade BTCUSD.
+"""v22_test_trade_btc.py - Test rapide d'un trade BTCUSD avec SPLIT.
 
-Place 1 ordre BUY 0.01 lot BTCUSD avec SL/TP a +-200$ du prix actuel.
-But : valider que le pipeline MT5Executor marche bout en bout.
+Place 2 ordres BTCUSD pour valider la strategie split Vantage :
+- Ordre 1 (50%) -> TP 1R
+- Ordre 2 (50%) -> TP 2R (runner)
+
+Volume : 0.02 lot total (= 2x0.01)
 """
 import sys
 from pathlib import Path
@@ -32,42 +35,45 @@ if tick is None:
 ask = tick.ask; bid = tick.bid
 print(f"BTCUSD : ask={ask:.2f} bid={bid:.2f}")
 
-# SL/TP : 200$ chacun = ~0.27% du prix BTC ~73000 (au-dessus du min 0.1% qu'on a hardcode)
+# SL/TP : risque 300$ = RR1 et RR2
 sl = ask - 300.0       # 300$ sous l'ask
-tp = ask + 600.0       # 600$ au-dessus = RR 2
+risk = ask - sl        # = 300
+tp_1r = ask + 1.0 * risk   # +300$
+tp_2r = ask + 2.0 * risk   # +600$
 
-print(f"BUY entry={ask:.2f} sl={sl:.2f} tp={tp:.2f} (SL=-300$ TP=+600$ RR=2)")
+print(f"BUY split : entry={ask:.2f} sl={sl:.2f} tp1R={tp_1r:.2f} tp2R={tp_2r:.2f}")
+print()
 
-# Place ordre
-result = mt5_exec.place_market_order(
-    symbol="BTCUSD",
-    direction="bullish",
-    volume=0.01,
-    sl=sl,
-    tp=tp,
-    comment="V22-TEST-BTC",
-    magic=22260530,
+# Order 1 : PARTIAL (50%) - TP 1R
+print(">> PARTIAL (0.01 lot TP 1R)")
+r1 = mt5_exec.place_market_order(
+    symbol="BTCUSD", direction="bullish", volume=0.01,
+    sl=sl, tp=tp_1r,
+    comment="V22-TEST-BTC-P", magic=22260530,
 )
+if r1: print(f"  OK ticket={r1['ticket']} price={r1['price']}")
+else:  print(f"  FAILED")
 
-if result is None:
-    print("ORDER FAILED - voir log MT5")
-    sys.exit(1)
+# Order 2 : RUNNER (50%) - TP 2R
+print(">> RUNNER  (0.01 lot TP 2R)")
+r2 = mt5_exec.place_market_order(
+    symbol="BTCUSD", direction="bullish", volume=0.01,
+    sl=sl, tp=tp_2r,
+    comment="V22-TEST-BTC-R", magic=22260530,
+)
+if r2: print(f"  OK ticket={r2['ticket']} price={r2['price']}")
+else:  print(f"  FAILED")
 
 print()
-print(f"ORDER OK :")
-print(f"  ticket : {result['ticket']}")
-print(f"  price  : {result['price']}")
-print(f"  volume : {result['volume']}")
-print()
-
-# Recupere la position pour confirmer
+# Recupere les positions pour confirmer
 positions = mt5.positions_get(symbol="BTCUSD")
 if positions:
+    print("Positions actuelles BTCUSD magic 22260530 :")
     for p in positions:
         if p.magic == 22260530:
-            print(f"Position confirmee : ticket={p.ticket} type={p.type} vol={p.volume} "
-                  f"open={p.price_open:.2f} sl={p.sl:.2f} tp={p.tp:.2f} profit={p.profit:+.2f}")
+            print(f"  ticket={p.ticket} type={p.type} vol={p.volume} "
+                  f"open={p.price_open:.2f} sl={p.sl:.2f} tp={p.tp:.2f} profit={p.profit:+.2f} comment={p.comment}")
 
 mt5_exec.shutdown()
 print()
-print("Test termine. Tu peux fermer le trade manuellement depuis MT5 si tu veux.")
+print("Test termine. Quand le partial touche son TP, le bot live va bouger le SL du runner a entry.")

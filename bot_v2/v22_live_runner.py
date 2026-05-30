@@ -167,6 +167,9 @@ _daily_blocked: set[pd.Timestamp] = set()          # jours ou CB s'est declenche
 _initial_balance: float | None = None              # capital "de reference" pour liquidation
 _cycle_count = 0
 _liquidated = False
+# Paires partial+runner (Vantage pas de fermeture partielle):
+# {partial_ticket: {asset, direction, entry, sl, tp_1r, runner_ticket, be_moved}}
+_open_pairs: dict[int, dict] = {}
 
 
 # =====================================================================
@@ -473,38 +476,92 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
                                        "tier": tier})
                 continue
 
-            # Place ordre MARKET (le bot V22 entre quand le prix touche entry,
-            # mais en live on simplifie : si OB recent valide -> on entre au marche)
-            log.info(f"  [TRADE] {asset} {ob.direction} tier={tier} score={score} "
-                      f"lots={lots:.2f} entry={entry:.5f} sl={sl:.5f} tp={tp:.5f}")
-            order_res = mt5_exec.place_market_order(
-                symbol=asset,
-                direction=ob.direction,
-                volume=lots,
-                sl=sl, tp=tp,
-                comment=f"V22-{tier}-{ob.direction[:1].upper()}",
-                magic=BOT_MAGIC,
-            )
-            if order_res is None:
-                res["errors"].append(f"order_failed_{asset}")
-                continue
+            # SPLIT en 2 ordres (Vantage ne supporte pas la fermeture partielle) :
+            #  - Order 1 (50% vol) -> TP = 1R  (= "partial")
+            #  - Order 2 (50% vol) -> TP = 2R  (= "runner", SL movera a BE quand 1R touche)
+            # On respecte le volume_step et le volume_min du broker.
+            info = mt5.symbol_info(broker_sym(asset))
+            vol_min = info.volume_min if info else 0.01
+            vol_step = info.volume_step if info else 0.01
+            half_raw = lots / 2
+            half = round(half_raw / vol_step) * vol_step
+            half = round(half, 2)
+            # Si half < vol_min, on ne peut pas splitter : on prend 1 seul ordre @ vol_min, TP 2R
+            can_split = (half >= vol_min) and ((lots - half) >= vol_min)
+
+            # TP 1R = entry + 1*risk (partial 50%)
+            risk_amt = abs(entry - sl)
+            if ob.direction == "bullish":
+                tp_1r = entry + 1.0 * risk_amt
+            else:
+                tp_1r = entry - 1.0 * risk_amt
+
+            tickets = []
+            if can_split:
+                log.info(f"  [TRADE-SPLIT] {asset} {ob.direction} tier={tier} score={score} "
+                          f"total_lots={lots:.2f} = 2x{half:.2f} | entry={entry:.5f} sl={sl:.5f} "
+                          f"tp1R={tp_1r:.5f} tp2R={tp:.5f}")
+                # Order 1 : 50% TP 1R
+                r1 = mt5_exec.place_market_order(
+                    symbol=asset, direction=ob.direction, volume=half,
+                    sl=sl, tp=tp_1r,
+                    comment=f"V22-{tier}-{ob.direction[:1].upper()}-P",  # P = Partial
+                    magic=BOT_MAGIC,
+                )
+                # Order 2 : 50% TP 2R (runner)
+                r2 = mt5_exec.place_market_order(
+                    symbol=asset, direction=ob.direction, volume=half,
+                    sl=sl, tp=tp,
+                    comment=f"V22-{tier}-{ob.direction[:1].upper()}-R",  # R = Runner
+                    magic=BOT_MAGIC,
+                )
+                if r1 is None and r2 is None:
+                    res["errors"].append(f"order_failed_both_{asset}")
+                    continue
+                if r1: tickets.append(("P", r1))
+                if r2: tickets.append(("R", r2))
+                # Enregistre les 2 tickets pour suivi BE
+                if r1 and r2:
+                    _open_pairs[r1["ticket"]] = {
+                        "asset": asset, "direction": ob.direction,
+                        "entry": r1["price"], "sl": sl, "tp_1r": tp_1r,
+                        "runner_ticket": r2["ticket"], "be_moved": False,
+                    }
+            else:
+                # Volume trop petit pour splitter : 1 seul ordre TP 2R
+                log.info(f"  [TRADE-SINGLE] {asset} {ob.direction} tier={tier} score={score} "
+                          f"lots={lots:.2f} (split impossible: half={half:.2f} < min={vol_min}) "
+                          f"entry={entry:.5f} sl={sl:.5f} tp={tp:.5f}")
+                r1 = mt5_exec.place_market_order(
+                    symbol=asset, direction=ob.direction, volume=lots,
+                    sl=sl, tp=tp,
+                    comment=f"V22-{tier}-{ob.direction[:1].upper()}",
+                    magic=BOT_MAGIC,
+                )
+                if r1 is None:
+                    res["errors"].append(f"order_failed_{asset}")
+                    continue
+                tickets.append(("F", r1))   # F = Full
 
             res["n_traded"] += 1
 
-            # Push dashboard
+            # Push dashboard (1 setup, 1 ou 2 trades)
             try:
+                first = tickets[0][1]
                 pusher.push_setup(
                     instrument=asset, ts=ob.validation_ts,
                     direction=ob.direction,
-                    entry_price=order_res["price"],
+                    entry_price=first["price"],
                     sl=sl, tp=tp, rr=TP_RR, score=score,
                     ml_proba=None, killzone=f"FR_h{int(details['hour_fr'])}",
                 )
-                pusher.push_trade_executed(
-                    instrument=asset, ticket=order_res["ticket"],
-                    direction=ob.direction, volume=lots,
-                    price=order_res["price"], sl=sl, tp=tp,
-                )
+                for tag, r in tickets:
+                    pusher.push_trade_executed(
+                        instrument=asset, ticket=r["ticket"],
+                        direction=ob.direction, volume=r["volume"],
+                        price=r["price"], sl=sl,
+                        tp=(tp_1r if tag == "P" else tp),
+                    )
             except Exception as e:
                 log.warning(f"  push dashboard fail : {e}")
 
@@ -517,6 +574,52 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
 # =====================================================================
 # MAIN
 # =====================================================================
+
+def manage_open_pairs(mt5_exec: MT5Executor):
+    """Pour chaque paire (partial, runner) :
+    - Si le partial a touche son TP 1R (= position fermee) -> bouge le SL du runner a BE (= entry)
+    - Si le partial a touche son SL (= position fermee en perte) -> on laisse le runner sur son SL
+    - Si les 2 sont deja fermes -> retire la paire du tracking
+    """
+    if not _open_pairs:
+        return
+    to_remove = []
+    open_tickets = {p["ticket"]: p for p in mt5_exec.get_open_positions(magic=BOT_MAGIC)}
+    for partial_ticket, pair in list(_open_pairs.items()):
+        partial_pos = open_tickets.get(partial_ticket)
+        runner_pos = open_tickets.get(pair["runner_ticket"])
+        # Si les 2 sont fermes -> cleanup
+        if partial_pos is None and runner_pos is None:
+            log.info(f"  [PAIR-DONE] partial={partial_ticket} runner={pair['runner_ticket']} ({pair['asset']})")
+            to_remove.append(partial_ticket)
+            continue
+        # Si le partial est FERME mais runner ouvert : verifier si BE a deja ete bouge
+        if partial_pos is None and runner_pos is not None and not pair["be_moved"]:
+            # Bouger le SL du runner a entry (BE)
+            entry_be = pair["entry"]
+            # Pour bullish on s'assure que BE > SL actuel ; pour bearish que BE < SL actuel
+            ok = False
+            try:
+                req = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "position": pair["runner_ticket"],
+                    "sl": entry_be,
+                    "tp": runner_pos["tp"],
+                    "symbol": runner_pos["symbol"],
+                }
+                result = mt5.order_send(req)
+                if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    ok = True
+            except Exception as e:
+                log.warning(f"  [BE-FAIL] runner={pair['runner_ticket']}: {e}")
+            if ok:
+                pair["be_moved"] = True
+                log.info(f"  [BE-MOVED] {pair['asset']} runner={pair['runner_ticket']} SL -> {entry_be:.5f} (entry)")
+            else:
+                log.warning(f"  [BE-FAIL] runner={pair['runner_ticket']} ({pair['asset']}) retcode KO")
+    for k in to_remove:
+        _open_pairs.pop(k, None)
+
 
 def cleanup_seen_obs():
     """Toutes les 30 cycles, vire les OBs de >2h pour eviter memory leak."""
@@ -600,6 +703,12 @@ def main():
 
             # Update CB journalier
             update_daily_cb(mt5_exec, now_utc)
+
+            # Gestion BE des paires partial+runner (Vantage : pas de fermeture partielle)
+            try:
+                manage_open_pairs(mt5_exec)
+            except Exception as e:
+                log.warning(f"  manage_open_pairs error : {e}")
 
             # Process tous les actifs sequentiellement (22 actifs)
             n_obs_total = 0; n_passes_total = 0; n_traded_total = 0
