@@ -170,6 +170,13 @@ _liquidated = False
 # Paires partial+runner (Vantage pas de fermeture partielle):
 # {partial_ticket: {asset, direction, entry, sl, tp_1r, runner_ticket, be_moved}}
 _open_pairs: dict[int, dict] = {}
+# Trades ouverts tracks par ticket (pour detect close + push TRADE_CLOSED) :
+# {ticket: {asset, direction, entry, sl, tp, volume, opened_ts, opened_balance, magic}}
+_open_trades: dict[int, dict] = {}
+# Stats live cumulees
+_live_stats = {"total": 0, "wins": 0, "losses": 0, "pnl_total": 0.0}
+# Latencies par actif pour le dashboard (ms)
+_last_latencies: dict[str, int] = {}
 
 
 # =====================================================================
@@ -367,6 +374,7 @@ def update_daily_cb(mt5_exec: MT5Executor, now_utc: pd.Timestamp):
 
 def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) -> dict:
     """Scan + applique config V22 + decision pour 1 actif."""
+    t_asset = time.time()
     res = {"asset": asset, "n_obs": 0, "n_passes_rule": 0, "n_traded": 0,
            "rejets": [], "errors": []}
     cfg = PER_ASSET_CONFIG[asset]
@@ -545,22 +553,46 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
 
             res["n_traded"] += 1
 
+            # Track trades pour detect close + push TRADE_CLOSED apres
+            opened_ts = pd.Timestamp.now(tz="UTC")
+            current_balance = mt5_exec.get_balance()
+            for tag, r in tickets:
+                tp_this = tp_1r if tag == "P" else tp
+                _open_trades[r["ticket"]] = {
+                    "asset": asset, "direction": ob.direction,
+                    "entry": r["price"], "sl": sl, "tp": tp_this,
+                    "volume": r["volume"], "opened_ts": opened_ts,
+                    "opened_balance": current_balance, "tag": tag,
+                    "tier": tier, "score": score,
+                }
+
             # Push dashboard (1 setup, 1 ou 2 trades)
+            kz_label = f"FR_h{int(details['hour_fr'])}"
+            # Tier S/A/B/C en "ml_proba" (le dashboard l'affiche comme un score qualite 0-1)
+            tier_proba = {"S": 0.95, "A": 0.80, "B": 0.65, "C": 0.50, "D": 0.30}.get(tier, 0.0)
             try:
                 first = tickets[0][1]
                 pusher.push_setup(
                     instrument=asset, ts=ob.validation_ts,
                     direction=ob.direction,
-                    entry_price=first["price"],
-                    sl=sl, tp=tp, rr=TP_RR, score=score,
-                    ml_proba=None, killzone=f"FR_h{int(details['hour_fr'])}",
+                    entry_price=float(first["price"]),
+                    sl=float(sl), tp=float(tp), rr=float(TP_RR),
+                    score=int(score),
+                    ml_proba=float(tier_proba),
+                    killzone=kz_label,
                 )
                 for tag, r in tickets:
+                    tp_this = tp_1r if tag == "P" else tp
                     pusher.push_trade_executed(
-                        instrument=asset, ticket=r["ticket"],
-                        direction=ob.direction, volume=r["volume"],
-                        price=r["price"], sl=sl,
-                        tp=(tp_1r if tag == "P" else tp),
+                        instrument=asset, ticket=int(r["ticket"]),
+                        direction=ob.direction,
+                        entry=float(r["price"]),
+                        sl=float(sl), tp=float(tp_this),
+                        volume=float(r["volume"]),
+                        rr=float(TP_RR),
+                        ml_proba=float(tier_proba),
+                        score=int(score),
+                        killzone=kz_label,
                     )
             except Exception as e:
                 log.warning(f"  push dashboard fail : {e}")
@@ -568,6 +600,8 @@ def process_asset(asset: str, mt5_exec: MT5Executor, pusher: DashboardPusher) ->
     except Exception as e:
         res["errors"].append(f"asset_{asset}: {type(e).__name__}: {str(e)[:120]}")
 
+    # Latence (ms) pour le dashboard
+    res["latency_ms"] = int((time.time() - t_asset) * 1000)
     return res
 
 
@@ -619,6 +653,62 @@ def manage_open_pairs(mt5_exec: MT5Executor):
                 log.warning(f"  [BE-FAIL] runner={pair['runner_ticket']} ({pair['asset']}) retcode KO")
     for k in to_remove:
         _open_pairs.pop(k, None)
+
+
+def detect_closed_trades(mt5_exec: MT5Executor, pusher) -> int:
+    """Detecte les trades qui se sont fermes et push TRADE_CLOSED.
+    Met a jour _live_stats. Retourne nb trades fermes ce cycle."""
+    if not _open_trades:
+        return 0
+    open_tickets = {p["ticket"] for p in mt5_exec.get_open_positions(magic=BOT_MAGIC)}
+    closed_now = []
+    for ticket, info in list(_open_trades.items()):
+        if ticket not in open_tickets:
+            closed_now.append((ticket, info))
+            _open_trades.pop(ticket, None)
+    if not closed_now:
+        return 0
+
+    # Pour chaque trade ferme, recup le deal MT5 pour avoir le PnL reel
+    now_ts = pd.Timestamp.now(tz="UTC")
+    from_ts = now_ts - pd.Timedelta(hours=12)
+    try:
+        all_closed = mt5_exec.get_closed_deals(from_ts, now_ts, magic=BOT_MAGIC)
+    except Exception:
+        all_closed = []
+    deals_by_ticket: dict[int, dict] = {}
+    for d in all_closed:
+        # On match par position_id (ticket de l'ordre d'origine)
+        pos_id = d.get("position_id", d.get("ticket"))
+        if pos_id:
+            deals_by_ticket[int(pos_id)] = d
+
+    for ticket, info in closed_now:
+        deal = deals_by_ticket.get(ticket, {})
+        pnl_real = float(deal.get("profit", 0.0)) + float(deal.get("commission", 0.0)) + float(deal.get("swap", 0.0))
+        duration_min = (now_ts - info["opened_ts"]).total_seconds() / 60
+        # Outcome : WIN si PnL > 0, LOSS sinon
+        outcome = "WIN" if pnl_real > 0 else ("LOSS" if pnl_real < 0 else "BE")
+        # Update stats live
+        _live_stats["total"] += 1
+        if pnl_real > 0:
+            _live_stats["wins"] += 1
+        elif pnl_real < 0:
+            _live_stats["losses"] += 1
+        _live_stats["pnl_total"] += pnl_real
+        log.info(f"  [CLOSED] {info['asset']} ticket={ticket} {outcome} pnl={pnl_real:+.2f}EUR "
+                  f"duration={duration_min:.0f}min")
+        # Push TRADE_CLOSED
+        try:
+            if pusher:
+                pusher.push_trade_closed(
+                    ticket=ticket, outcome=outcome,
+                    pnl_real=pnl_real, duration_min=duration_min,
+                    instrument=info["asset"],
+                )
+        except Exception as e:
+            log.warning(f"  push trade_closed fail : {e}")
+    return len(closed_now)
 
 
 def cleanup_seen_obs():
@@ -710,6 +800,16 @@ def main():
             except Exception as e:
                 log.warning(f"  manage_open_pairs error : {e}")
 
+            # Detect closed trades + maj stats live + push TRADE_CLOSED
+            try:
+                n_closed = detect_closed_trades(mt5_exec, pusher)
+                if n_closed > 0:
+                    log.info(f"  [STATS] {n_closed} trades fermes -> total={_live_stats['total']} "
+                              f"W={_live_stats['wins']} L={_live_stats['losses']} "
+                              f"PnL={_live_stats['pnl_total']:+.2f}EUR")
+            except Exception as e:
+                log.warning(f"  detect_closed error : {e}")
+
             # Process tous les actifs sequentiellement (22 actifs)
             n_obs_total = 0; n_passes_total = 0; n_traded_total = 0
             all_rejets = []; all_errors = []
@@ -721,6 +821,7 @@ def main():
                     n_traded_total += r["n_traded"]
                     all_rejets.extend(r["rejets"])
                     all_errors.extend(r["errors"])
+                    _last_latencies[asset] = r.get("latency_ms", 0)
                 except Exception as e:
                     log.error(f"  asset {asset} crash : {type(e).__name__}: {e}")
 
@@ -730,15 +831,22 @@ def main():
 
             elapsed = time.time() - t_cycle
 
-            # Push stats
+            # Push stats / cycle / positions_sync
             balance = mt5_exec.get_balance()
             equity = mt5_exec.get_equity()
-            n_open = len(mt5_exec.get_open_positions(magic=BOT_MAGIC))
+            open_positions = mt5_exec.get_open_positions(magic=BOT_MAGIC)
+            n_open = len(open_positions)
+            tot = _live_stats["total"]
+            wr_pct = (_live_stats["wins"] / tot * 100) if tot > 0 else 0.0
+
             try:
                 if pusher:
                     pusher.push_stats(
-                        total=0, wins=0, losses=0, wr_pct=0.0,
-                        pnl_total=balance - (_initial_balance or balance),
+                        total=_live_stats["total"],
+                        wins=_live_stats["wins"],
+                        losses=_live_stats["losses"],
+                        wr_pct=wr_pct,
+                        pnl_total=_live_stats["pnl_total"],
                         balance=balance, equity=equity,
                         positions_open=n_open,
                     )
@@ -747,7 +855,16 @@ def main():
                     pusher.push_cycle(
                         actifs_scanned=len(ASSETS),
                         total_s=elapsed, fetch_s=0.0, compute_s=elapsed,
-                        latencies={},
+                        latencies=dict(_last_latencies),
+                    )
+                    # POSITIONS_SYNC pour KPI + statut FILLED des trades
+                    sync_positions = [
+                        {"ticket": p["ticket"], "pnl": p.get("pnl", p.get("profit", 0.0))}
+                        for p in open_positions
+                    ]
+                    pusher.push_positions_sync(
+                        open_positions=sync_positions,
+                        pending_tickets=[],
                     )
             except Exception as e:
                 log.warning(f"push stats fail : {e}")
@@ -789,6 +906,7 @@ class _NoopPusher:
     def push_trade_executed(self, *a, **k): pass
     def push_trade_closed(self, *a, **k): pass
     def push_stats(self, *a, **k): pass
+    def push_positions_sync(self, *a, **k): pass
 
 
 if __name__ == "__main__":
