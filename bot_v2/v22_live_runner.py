@@ -126,7 +126,7 @@ PER_ASSET_CONFIG = {
 ASSETS = list(PER_ASSET_CONFIG.keys())
 
 # Sizing CONSERVATEUR (NE PAS toucher sans re-validation)
-TIER_RISK = {"S": 0.30, "A": 0.10, "B": 0.10, "C": 0.10, "D": 0.0}
+TIER_RISK = {"S": 0.30, "A": 0.15, "B": 0.10, "C": 0.05, "D": 0.0}
 
 # Plan trade
 TP_RR = 2.0
